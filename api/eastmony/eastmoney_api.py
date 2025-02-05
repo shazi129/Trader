@@ -13,7 +13,7 @@ class EastMoneyAPI(StockAPI):
     def __init__(self):
         self._kline_url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
         self._kline_param = {
-            "secid": '122.XAG', #股票代码
+            "secid": '101.SI00Y', #股票代码
             "beg": "20230101",  #开始时间
             "end": "20240101",  #结束时间
             "klt":101,    # k线周期，1：1分钟，5：5分钟， 101：日，102：周
@@ -60,6 +60,9 @@ class EastMoneyAPI(StockAPI):
             kline_data.close = float(fields[2])
             kline_data.high = float(fields[3])
             kline_data.low = float(fields[4])
+            kline_data.volume = float(fields[5])
+            kline_data.turnover = float(fields[6])
+            kline_data.turnover_rate = float(fields[10])
             result.append(kline_data)
         
         return result
@@ -67,6 +70,10 @@ class EastMoneyAPI(StockAPI):
     
     def get_real_stock_code(self, code: StockCode) -> str:
         match code:
-            case StockCode.AG:
-                return '122.XAG'
+            case StockCode.COMEX_AG:
+                return '101.SI00Y'
+            case StockCode.COMEX_AU:
+                return '101.GC00Y'
+            case StockCode.TX:
+                return '116.00700'
         return super().get_real_stock_code(code)

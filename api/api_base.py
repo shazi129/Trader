@@ -6,10 +6,10 @@ from dataclasses import dataclass
 
 #股票代码枚举，统一对外接口
 class StockCode(Enum):
-    AG      = 1          #白银
-    AU      = 2          #黄金
-    TX      = 3          #腾讯
-    ALI     = 4          #阿里港股
+    COMEX_AG      = 1          #Comex白银
+    COMEX_AU      = 2          #Comex黄金
+    TX            = 3          #腾讯
+    ALI           = 4          #阿里港股
 
 class KlineData:
     def __init__(self):
