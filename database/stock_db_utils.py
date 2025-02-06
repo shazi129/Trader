@@ -2,7 +2,7 @@
 
 import os
 import sqlite3
-from api.api_base import KlineData, StockCode
+from api.api_base import KlineData
 
 class StockDB:
 
@@ -60,14 +60,14 @@ class StockDB:
         self._cursor.execute(sql)
         self._connection.commit()
 
-    def create_stock_table(self, code: StockCode):
+    def create_stock_table(self, name: str):
         #创建原始数据表
-        self.create_table(code.name, self._stock_raw_table)
+        self.create_table(name, self._stock_raw_table)
 
         #创建股票指标表
-        self.create_table(code.name + "_Ind", self._stock_param_table)
+        self.create_table(name + "_Ind", self._stock_param_table)
 
-    def write_raw_data(self, code: StockCode, data:KlineData):
+    def write_raw_data(self, name:str, data:KlineData):
         db_data= {
             "Date": data.date,
             "Open": data.open,
@@ -92,7 +92,7 @@ class StockDB:
             cols += prefix + k
             values += prefix + v
 
-        sql = 'INSERT INTO %s(%s) VALUES(%s)' % (code.name, cols, values)
+        sql = 'INSERT INTO %s(%s) VALUES(%s)' % (name, cols, values)
         print(sql)
 
         try:
@@ -101,8 +101,8 @@ class StockDB:
         except sqlite3.IntegrityError as e:
             print("Insert error: ", e.sqlite_errorname)
 
-    def get_lastest_date(self, code: StockCode)->str:
-        sql = "SELECT MAX(Date) as RecentDate FROM %s" % code.name
+    def get_lastest_date(self, name:str)->str:
+        sql = "SELECT MAX(Date) as RecentDate FROM %s" % name
         print(sql)
 
         try:

@@ -5,29 +5,62 @@
 东方财富api
 """
 
+import datetime
 import requests
 import json
-from api.api_base import KlineData, StockAPI, StockCode
+from api.api_base import KlineData, StockAPI, StockList, StockMarket
 
 class EastMoneyAPI(StockAPI):
     def __init__(self):
+        self._fields = [
+            'f51', #日期
+            'f52', #开盘价
+            'f53', #收盘价
+            'f54', #最高
+            'f55', #最低
+            'f56', #成交量
+            'f57', #成交额
+            'f58', #振幅
+            'f59', #涨跌幅
+            'f60', #涨跌额
+            'f61'  #换手率
+        ]
         self._kline_url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
         self._kline_param = {
-            "secid": '101.SI00Y', #股票代码
+            "secid": '101.SI00Y', #股票代码, 0深股 1沪股
             "beg": "20230101",  #开始时间
             "end": "20240101",  #结束时间
             "klt":101,    # k线周期，1：1分钟，5：5分钟， 101：日，102：周
-            "fqt":1,        #复权方式，0: 不复权，1：前复权，2：后复权
+            "fqt":0,        #复权方式，0: 不复权，1：前复权，2：后复权
             "fields1" : 'f1,f2,f3,f4,f5',
-            "fields2": 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61', #f51-f61: 日期，开盘价，收盘价，最高，最低，成交量，成交额，振幅，涨跌幅，涨跌额，换手率
+            "fields2": ','.join(self._fields),
             "lmt":58,
             "ut": "fa5fd1943c7b386f172d6893dbfba10b"
         }
 
-    def get_day_klines(self, code: StockCode, start: str, end: str) -> list[KlineData]:
-        self._kline_param["secid"] = self.get_real_stock_code(code)
-        self._kline_param["beg"] = start
-        self._kline_param["end"] = end
+    def get_secid(self, name:str)-> str:
+        stock = StockList[name]
+        match stock.market:
+            case StockMarket.SH:
+                return "0.%s" % stock.code
+            case StockMarket.SZ:
+                return "1.%s" % stock.code
+            case StockMarket.COMEX:
+                return "101.%s" % stock.code
+            case StockMarket.HK:
+                return "116.%s" % stock.code
+        return None
+
+    def get_day_klines(self, name: str, start: datetime.datetime, end:datetime.datetime) -> list[KlineData]:
+        #获取secid
+        secid = self.get_secid(name)
+        if secid == None:
+            print("eastmony api cannot get secid by " + name)
+            return []
+
+        self._kline_param["secid"] = secid
+        self._kline_param["beg"] = start.strftime("%Y%m%d")
+        self._kline_param["end"] = end.strftime("%Y%m%d")
 
         #拼接get参数
         get_param_str = ""
@@ -51,8 +84,8 @@ class EastMoneyAPI(StockAPI):
 
         for str_kline in response["data"]["klines"]:
             fields = str_kline.split(",")
-            if (len(fields) < 5):
-                print("invalid kline info:" + str_kline)
+            if (len(fields) < len(self._fields)):
+                print("invalid %s kline info: %s" % (name, str_kline))
                 continue
             kline_data = KlineData()
             kline_data.date = fields[0]
@@ -66,14 +99,3 @@ class EastMoneyAPI(StockAPI):
             result.append(kline_data)
         
         return result
-
-    
-    def get_real_stock_code(self, code: StockCode) -> str:
-        match code:
-            case StockCode.COMEX_AG:
-                return '101.SI00Y'
-            case StockCode.COMEX_AU:
-                return '101.GC00Y'
-            case StockCode.TX:
-                return '116.00700'
-        return super().get_real_stock_code(code)
