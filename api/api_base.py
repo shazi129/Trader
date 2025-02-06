@@ -17,6 +17,9 @@ class StockInfo:
         self.market: StockMarket = market #所属市场
         self.listing_date:str = listing_date #上市日期
 
+    def get_list_date(self)->datetime.datetime:
+        return datetime.datetime.strptime(self.listing_date, "%Y-%m-%d")
+
 StockList: dict[str, StockInfo] = {
     "Tencent": StockInfo('00700',  StockMarket.HK, "2004-06-16"),
     "Alibaba": StockInfo('09988', StockMarket.HK, "2004-06-16"),

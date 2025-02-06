@@ -21,6 +21,12 @@ def get_date_span(latest_date, span):
 
 def update_stock_db(name: str):
     """更新一个k线数据库"""
+
+    stock_info = api_base.StockList[name]
+    if stock_info == None:
+        print("update_stock_db error, invalid name: %s" % name)
+        return
+
     stock_db = stock_db_utils.StockDB()
     stock_db.create_stock_table(name)
 
@@ -29,6 +35,9 @@ def update_stock_db(name: str):
     if (begin_date == None):
         begin_date = "1990-01-01"
     begin_date = datetime.strptime(begin_date, "%Y-%m-%d")
+    listing_date = stock_info.get_list_date() #开始时间要从上市日期算
+    if begin_date < listing_date:
+        begin_date = listing_date
 
     #结束时间为昨天
     yesdoday = datetime.now() - timedelta(days=1)
@@ -40,7 +49,7 @@ def update_stock_db(name: str):
             end_date = begin_date + timedelta(days=200)
 
         #拉数据并写入数据库
-        klines = get_day_klines(name, begin_date.strftime("%Y%m%d"), end_date.strftime("%Y%m%d"))
+        klines = get_day_klines(name, begin_date, end_date)
         for kline in klines:
             stock_db.write_raw_data(name, kline)
 
