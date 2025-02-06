@@ -15,7 +15,8 @@ class StockDB:
         "Low":          "REAL",                  #最低价
         "Volume":       "REAL",                 #成交量
         "Turnover":     "REAL",                 #成交额
-        "TurnoverRate": "REAL"                  #换手率
+        "TurnoverRate": "REAL",                  #换手率
+        "PE":           "REAL"                  #市盈率
     }
 
     #股票参数表
@@ -76,7 +77,8 @@ class StockDB:
             "Low": data.low,
             "Volume": data.volume,
             "Turnover": data.turnover,
-            "TurnoverRate":data.turnover_rate
+            "TurnoverRate":data.turnover_rate,
+            "PE": data.pe
         }
 
         cols = ""

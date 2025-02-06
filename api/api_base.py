@@ -36,11 +36,11 @@ class KlineData:
         self.volume:float = 0       #成交量
         self.turnover:float = 0     #成交额
         self.turnover_rate:float = 0    #换手率
-        self.dividend:float = 0 #分红
+        self.pe:float = 0 #市盈率
 
     def __str__(self) -> str:
-        return "date:%s, open:%f, close:%f, high:%f, low:%f, volume:%f, turnover:%f, turnover_rate:%f, dividend:%f" % (
-            self.date, self.open, self.close, self.high, self.low, self.volume, self.turnover, self.turnover_rate, self.dividend
+        return "date:%s, open:%f, close:%f, high:%f, low:%f, volume:%f, turnover:%f, turnover_rate:%f, pe:%f" % (
+            self.date, self.open, self.close, self.high, self.low, self.volume, self.turnover, self.turnover_rate, self.pe
         )
 
 class StockAPI:

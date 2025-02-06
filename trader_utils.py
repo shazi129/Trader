@@ -34,7 +34,7 @@ def update_stock_db(name: str):
     begin_date = stock_db.get_lastest_date(name)
     if (begin_date == None):
         begin_date = "1990-01-01"
-    begin_date = datetime.strptime(begin_date, "%Y-%m-%d")
+    begin_date = datetime.strptime(begin_date, "%Y-%m-%d") + timedelta(days=1)
     listing_date = stock_info.get_list_date() #开始时间要从上市日期算
     if begin_date < listing_date:
         begin_date = listing_date
@@ -42,7 +42,7 @@ def update_stock_db(name: str):
     #结束时间为昨天
     yesdoday = datetime.now() - timedelta(days=1)
 
-    while(begin_date < yesdoday):
+    while((yesdoday - begin_date).days > 0):
         delta_day = (yesdoday - begin_date).days
         end_date = yesdoday
         if delta_day > 200:
