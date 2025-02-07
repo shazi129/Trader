@@ -20,7 +20,7 @@ class StockDB:
     }
 
     #股票参数表
-    _stock_param_table = {
+    _stock_indicator_table = {
         "Date":     "DATE primary key",     #日期
         "MA5":      "REAL",
         "MA10":     "REAL",
@@ -66,7 +66,7 @@ class StockDB:
         self.create_table(name, self._stock_raw_table)
 
         #创建股票指标表
-        self.create_table(name + "_Ind", self._stock_param_table)
+        self.create_table(name + "_Ind", self._stock_indicator_table)
 
     def write_raw_data(self, name:str, data:KlineData):
         db_data= {

@@ -3,6 +3,10 @@
 
 """
 东方财富api
+https://so.eastmoney.com/web/s?keyword=00700
+https://push2.eastmoney.com/api/qt/stock/get?ut=6d2ffaa6a585d612eda28417681d58fb&fields=f57,f58,f59,f152,f43,f169,f170,f60,f44,f45,f168,f50,f47,f48,f49,f46,f78,f85,f86,f169,f117,f107,f111,f116,f117,f118,f163,f171,f113,f114,f115,f161,f162,f164,f168,f172,f177,f180,f181,f292,f751,f752&secid=116.00700&invt=2&_=1738833820289
+https://push2his.eastmoney.com/api/qt/stock/kline/get?fields1=f1,f2,f3,f4,f5,f6,f7,f8&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65&ut=fa5fd1943c7b386f172d6893dbfba10b&secid=116.00700&dect=1&klt=101&lmt=70&fqt=1&forcect=1&end=20500000&wbp2u=1849325530509956|0|1|0|web&cb=__jp0
+https://push2.eastmoney.com/api/qt/stock/trends2/get?fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f17&fields2=f51,f52,f53,f54,f55,f58&dect=1&mpi=1000&ut=fa5fd1943c7b386f172d6893dbfba10b&secid=116.00700&ndays=1&iscr=0&iscca=0&wbp2u=1849325530509956|0|1|0|web&cb=miniquotechart_jp0
 """
 
 import datetime

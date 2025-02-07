@@ -22,7 +22,7 @@ class StockInfo:
 
 StockList: dict[str, StockInfo] = {
     "Tencent": StockInfo('00700',  StockMarket.HK, "2004-06-16"),
-    "Alibaba": StockInfo('09988', StockMarket.HK, "2004-06-16"),
+    "Alibaba": StockInfo('09988', StockMarket.HK, "2019-11-26"),
     "COMEX_AG": StockInfo('SI00Y', StockMarket.COMEX, "2011-07-22")
 }
 
