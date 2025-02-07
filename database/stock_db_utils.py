@@ -61,12 +61,15 @@ class StockDB:
         self._cursor.execute(sql)
         self._connection.commit()
 
+    def get_indicator_table_name(self, name:str):
+        return name + "_Ind"
+
     def create_stock_table(self, name: str):
         #创建原始数据表
         self.create_table(name, self._stock_raw_table)
 
         #创建股票指标表
-        self.create_table(name + "_Ind", self._stock_indicator_table)
+        self.create_table(self.get_indicator_table_name(name), self._stock_indicator_table)
 
     def write_raw_data(self, name:str, data:KlineData):
         db_data= {
@@ -103,7 +106,7 @@ class StockDB:
         except sqlite3.IntegrityError as e:
             print("Insert error: ", e.sqlite_errorname)
 
-    def get_lastest_date(self, name:str)->str:
+    def get_latest_date(self, name:str)->str:
         sql = "SELECT MAX(Date) as RecentDate FROM %s" % name
         print(sql)
 
@@ -114,3 +117,35 @@ class StockDB:
         except sqlite3.IntegrityError as e:
             print("Insert error: ", e.sqlite_errorname)
             return None
+
+    def get_latest_klines(self, name:str, size:int)->list[KlineData]:
+        sql = "SELECT * FROM %s ORDER BY Date DESC LIMIT %d" % (name, size)
+        print(sql)
+
+        try:
+            self._cursor.execute(sql)
+            result: list[KlineData] = []
+            for row in self._cursor.fetchall():
+                kline = KlineData()
+                if kline.parse(row):
+                    result.append(kline)
+            return result
+        except sqlite3.IntegrityError as e:
+            print("get_latest_klines error: ", e.sqlite_errorname)
+            return None
+        
+    def get_row_num(self, table_name:str)->int:
+        sql = "SELECT COUNT(*) FROM %s" % table_name
+        print(sql)
+        try:
+            self._cursor.execute(sql)
+            row = self._cursor.fetchone()
+            return row[0]
+        except sqlite3.IntegrityError as e:
+            print("get_row_num error: ", e.sqlite_errorname)
+            return None
+        
+    def get_stock_rows(self, name:str)->tuple[int, int]:
+        kline_size = self.get_row_num(name)
+        indicator_size = self.get_row_num(self.get_indicator_table_name(name))
+        return (kline_size, indicator_size)

@@ -28,7 +28,7 @@ StockList: dict[str, StockInfo] = {
 
 class KlineData:
     def __init__(self):
-        self.date:str = ""         #日期
+        self.date:str = ""         #日期, 格式: 2025-02-04
         self.open:float = 0      #开盘价
         self.close:float = 0       #收盘价
         self.high:float = 0         #最高价
@@ -37,6 +37,24 @@ class KlineData:
         self.turnover:float = 0     #成交额
         self.turnover_rate:float = 0    #换手率
         self.pe:float = 0 #市盈率
+
+    def FIELD_NUM():
+        return 9
+    
+    def parse(self, v: tuple)->bool:
+        if len(v) != 9 or not isinstance(v, tuple):
+            print("KlineData parse error, invalud v:%s" % str(v))
+            return False
+        self.date = str(v[0])
+        self.open = float(v[1])
+        self.close = float(v[2])
+        self.high = float(v[3])
+        self.low = float(v[4])
+        self.volume = float(v[5])
+        self.turnover = float(v[6])
+        self.turnover_rate = float(v[7])
+        self.pe = float(v[8])
+        return True
 
     def __str__(self) -> str:
         return "date:%s, open:%f, close:%f, high:%f, low:%f, volume:%f, turnover:%f, turnover_rate:%f, pe:%f" % (

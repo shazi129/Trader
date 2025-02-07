@@ -4,6 +4,7 @@ import numpy
 from api import api_base
 from datetime import datetime
 
+
 def test_kline_api():
     print("\n".join([str(item) for item in trader_utils.get_day_klines(
         "Tencent",
@@ -25,5 +26,6 @@ def test_talib():
 if __name__ == "__main__":
     #test_kline_api()
     #test_update_db()
-    test_talib()
+    #test_talib()
     #trader_utils.update_stock_data()
+    trader_utils.update_socket_indicator("Tencent")
