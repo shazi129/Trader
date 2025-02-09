@@ -2,7 +2,7 @@
 
 import os
 import sqlite3
-from api.api_base import KlineData
+from api.api_base import KlineData, KlineIndicator
 
 class StockDB:
 
@@ -71,33 +71,30 @@ class StockDB:
         #创建股票指标表
         self.create_table(self.get_indicator_table_name(name), self._stock_indicator_table)
 
-    def write_raw_data(self, name:str, data:KlineData):
-        db_data= {
-            "Date": data.date,
-            "Open": data.open,
-            "Close": data.close,
-            "High": data.high,                
-            "Low": data.low,
-            "Volume": data.volume,
-            "Turnover": data.turnover,
-            "TurnoverRate":data.turnover_rate,
-            "PE": data.pe
+    def parse_kline(self, kline: KlineData)->dict:
+        row_data= {
+            "Date": kline.date,
+            "Open": kline.open,
+            "Close": kline.close,
+            "High": kline.high,                
+            "Low": kline.low,
+            "Volume": kline.volume,
+            "Turnover": kline.turnover,
+            "TurnoverRate":kline.turnover_rate,
+            "PE": kline.pe
         }
+        return row_data
+    
+    def parse_indicator(self, indicator: KlineIndicator)->dict:
+        row_data={
 
-        cols = ""
-        values = ""
-        for k, v in db_data.items():
-            prefix = ""
-            if cols != "":
-                prefix = ", "
-            if isinstance(v, str):
-                v = "'%s'" % v
-            else:
-                v = str(v)
-            cols += prefix + k
-            values += prefix + v
+        }
+        return row_data
 
-        sql = 'INSERT INTO %s(%s) VALUES(%s)' % (name, cols, values)
+    def write_raw_data(self, name:str, data:dict):
+        keys = ",".join(data.keys())
+        values = ",".join([f'\'{item}\'' if isinstance(item, str) else str(item) for item in data.values()])
+        sql = 'INSERT INTO %s(%s) VALUES(%s)' % (name, keys, values)
         print(sql)
 
         try:

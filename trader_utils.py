@@ -25,7 +25,7 @@ def update_stock_klines(name: str)->int:
 
     stock_info = api_base.StockList[name]
     if stock_info == None:
-        print("update_stock_db error, invalid name: %s" % name)
+        print("update_stock_klines error, invalid name: %s" % name)
         return 0
 
     stock_db = stock_db_utils.StockDB()
@@ -54,7 +54,7 @@ def update_stock_klines(name: str)->int:
         klines = get_day_klines(name, begin_date, end_date)
         count += len(klines)
         for kline in klines:
-            stock_db.write_raw_data(name, kline)
+            stock_db.write_raw_data(name, stock_db.parse_kline(kline))
 
         begin_date = end_date + timedelta(days=1)
 

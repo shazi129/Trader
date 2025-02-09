@@ -60,6 +60,39 @@ class KlineData:
         return "date:%s, open:%f, close:%f, high:%f, low:%f, volume:%f, turnover:%f, turnover_rate:%f, pe:%f" % (
             self.date, self.open, self.close, self.high, self.low, self.volume, self.turnover, self.turnover_rate, self.pe
         )
+    
+class KlineIndicator:
+    def __init__(self) -> None:
+        self.date:str = ""         #日期, 格式: 2025-02-04
+
+        #均线
+        self.ma5:float =     0
+        self.ma10:float =     0
+        self.ma20:float =     0
+        self.ma30:float =     0
+        self.ma60:float =     0
+        self.ma120:float =     0
+        self.ma250:float =     0
+
+        #布林带, 中线是20均线
+        self.boll_up:float = 0
+        self.boll_low:float = 0
+
+        #KDJ
+        self.k = 0
+        self.d = 0
+        self.j = 0
+
+        #MACD
+        self.dif = 0
+        self.dea = 0
+        self.macd = 0
+
+        #RSI
+        self.rsi1 = 0
+        self.rsi2 = 0
+        self.rsi3 = 0
+
 
 class StockAPI:
     """所有API的基类"""

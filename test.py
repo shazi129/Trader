@@ -11,8 +11,8 @@ def test_kline_api():
         datetime.strptime("2025-01-24","%Y-%m-%d"),
         datetime.strptime("2025-02-05","%Y-%m-%d"))]))
 
-def test_update_db():
-    trader_utils.update_stock_db("Tencent")
+def test_update_stock_klines():
+    trader_utils.update_stock_klines("Tencent")
 
 
 def test_talib():
@@ -25,7 +25,9 @@ def test_talib():
 
 if __name__ == "__main__":
     #test_kline_api()
-    #test_update_db()
+    test_update_stock_klines()
     #test_talib()
     #trader_utils.update_stock_data()
-    trader_utils.update_socket_indicator("Tencent")
+    #trader_utils.update_socket_indicator("Tencent")
+    #items = ['2025-02-07', 420.4, 428.2, 432.4, 417.8, 34567530.0, 14741790976.0, 0.38, 0]
+    #print(",".join([f'\'{item}\'' if isinstance(item, str) else str(item) for item in items]))
