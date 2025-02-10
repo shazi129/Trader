@@ -28,7 +28,22 @@ class StockDB:
         "MA30":     "REAL",
         "MA60":     "REAL",
         "MA120":    "REAL",
-        "MA250":    "REAL"
+        "MA250":    "REAL",
+
+        "BollUp":   "REAL",
+        "BollLow":  "REAL",
+
+        "K":        "REAL",
+        "D":        "REAL",
+        "J":        "REAL",
+
+        "Dif":      "REAL",
+        "Dea":      "REAL",
+        "MACD":     "REAL",
+
+        "RSI1":     "REAL",
+        "RSI2":     "REAL",
+        "RSI3":     "REAL",
     }
 
     def __init__(self) -> None:
@@ -87,7 +102,31 @@ class StockDB:
     
     def parse_indicator(self, indicator: KlineIndicator)->dict:
         row_data={
+            "Date": indicator.date,     #日期
+            "MA5": indicator.ma5,
+            "MA10": indicator.ma10,
+            "MA20": indicator.ma20,
+            "MA30": indicator.ma30,
+            "MA60": indicator.ma60,
+            "MA120": indicator.ma120,
+            "MA250": indicator.ma250,
 
+            "BollUp": indicator.boll_up,
+            "BollLow": indicator.boll_low,
+
+            "K": indicator.k,
+            "D": indicator.d,
+            "J": indicator.j,
+
+            "Dif": indicator.dif,
+            "Dea": indicator.dea,
+            "MACD": indicator.macd,
+
+            "RSI1": indicator.rsi1,
+            "RSI2": indicator.rsi2,
+            "RSI3": indicator.rsi3,
+
+            "ADOSC": indicator.adosc,
         }
         return row_data
 

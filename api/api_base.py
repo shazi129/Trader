@@ -93,6 +93,9 @@ class KlineIndicator:
         self.rsi2 = 0
         self.rsi3 = 0
 
+        #ADOSC
+        self.adosc = 0
+
 
 class StockAPI:
     """所有API的基类"""
