@@ -96,6 +96,13 @@ class KlineIndicator:
         #ADOSC
         self.adosc = 0
 
+    def __str__(self) -> str:
+        return "date:%s, ma5:%f, ma10:%f, ma20:%f, ma30:%f, ma60:%f, ma120:%f, ma250:%f, boll_up:%f, boll_low:%f, \
+k:%f, d:%f, j:%f, dif:%f, dea:%f, macd:%f, rsi1:%f, rsi2:%f, rsi3:%f, adosc:%f" % (
+            self.date, self.ma5, self.ma10, self.ma20, self.ma30, self.ma60, self.ma120, self.ma250,
+            self.boll_up, self.boll_low, self.k, self.d, self.j, self.dif, self.dea, self.macd,
+            self.rsi1, self.rsi2, self.rsi3, self.adosc)
+
 
 class StockAPI:
     """所有API的基类"""

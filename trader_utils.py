@@ -77,10 +77,6 @@ def update_socket_indicator(name: str)->int:
     read_size = update_size + 250  #最多250条k线可以把所有指标计算完
     klines = stock_db.get_latest_klines(name, read_size)
 
-    #日期，升序
-    kline_dates = [kline.date for kline in klines]
-    kline_dates.reverse()
-
     #收盘价
     kline_closes = [kline.close for kline in klines]
     kline_closes.reverse()
@@ -99,27 +95,66 @@ def update_socket_indicator(name: str)->int:
 
     #MA
     close_np_array = np.array(kline_closes)
-    sma5_list = tb.SMA(close_np_array, 5)[-update_size:]
-    sma10_list = tb.SMA(close_np_array, 10)[-update_size:]
-    sma20_list = tb.SMA(close_np_array, 20)[-update_size:]
-    sma30_list = tb.SMA(close_np_array, 30)[-update_size:]
-    sma60_list = tb.SMA(close_np_array, 60)[-update_size:]
-    sma120_list = tb.SMA(close_np_array, 120)[-update_size:]
-    sma250_list = tb.SMA(close_np_array, 250)[-update_size:]
+    sma5_list = tb.MA(close_np_array, 5)[-update_size:]
+    sma10_list = tb.MA(close_np_array, 10)[-update_size:]
+    sma20_list = tb.MA(close_np_array, 20)[-update_size:]
+    sma30_list = tb.MA(close_np_array, 30)[-update_size:]
+    sma60_list = tb.MA(close_np_array, 60)[-update_size:]
+    sma120_list = tb.MA(close_np_array, 120)[-update_size:]
+    sma250_list = tb.MA(close_np_array, 250)[-update_size:]
 
-    upper, middle, lower = tb.BBANDS(close_np_array)[-update_size:]
+    #BOLL
+    upper, middle, lower = tb.BBANDS(close_np_array, timeperiod=20)[-update_size:]
+
+    #KDJ
+    k, d = tb.STOCH(np.array(kline_high), np.array(kline_low), close_np_array, fastk_period=9, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)[-update_size:]
+    j = np.subtract(np.multiply(k, 3), np.multiply(d, 2))
+
+    #MACD
     dif, dea, macd = tb.MACD(close_np_array)[-update_size:]
 
+    #RSI
     rsi1 = tb.RSI(close_np_array, 6)[-update_size:]
     rsi2 = tb.RSI(close_np_array, 12)[-update_size:]
     rsi3 = tb.RSI(close_np_array, 24)[-update_size:]
 
+    #ADOSC
     adosc = tb.ADOSC(np.array(kline_high), np.array(kline_low), close_np_array, np.array(kline_volume))[-update_size:]
 
-    print(range(-update_size))
+    #日期，升序
+    kline_dates = [kline.date for kline in klines][-update_size:]
+    kline_dates.reverse()
+
     for i in range(len(kline_dates)):
         indicator = api_base.KlineIndicator()
-        indicator.date = kline_dates
+        indicator.date = kline_dates[i]
+        indicator.ma5 = sma5_list[i]
+        indicator.ma10 = sma10_list[i]
+        indicator.ma20 = sma20_list[i]
+        indicator.ma30 = sma30_list[i]
+        indicator.ma60 = sma60_list[i]
+        indicator.ma120 = sma120_list[i]
+        indicator.ma250 = sma250_list[i]
+
+        indicator.boll_low = lower[i]
+        indicator.boll_up = upper[i]
+
+        indicator.k = k[i]
+        indicator.d = d[i]
+        indicator.j = j[i]
+
+        indicator.dif = dif[i]
+        indicator.dea = dea[i]
+        indicator.macd = macd[i] * 2
+
+        indicator.rsi1 = rsi1[i]
+        indicator.rsi2 = rsi2[i]
+        indicator.rsi3 = rsi3[i]
+
+        indicator.adosc = adosc[i]
+
+        if i > len(kline_dates) - 5:
+            print(str(indicator))
 
     #写入数据表
 def get_yestoday()->str:
