@@ -62,6 +62,7 @@ def update_stock_klines(name: str)->int:
 def update_all_klines():
     for stock_name in api_base.StockList:
         update_stock_klines(stock_name)
+        update_socket_indicator(stock_name)
 
 def update_socket_indicator(name: str)->int:
     stock_info = api_base.StockList[name]
@@ -70,6 +71,8 @@ def update_socket_indicator(name: str)->int:
         return 0
     
     stock_db = stock_db_utils.StockDB()
+    stock_db.create_indicator_table(name)
+
     table_size = stock_db.get_stock_rows(name)
 
     #需要更新的指标条数
@@ -104,10 +107,12 @@ def update_socket_indicator(name: str)->int:
     sma250_list = tb.MA(close_np_array, 250)[-update_size:]
 
     #BOLL
-    upper, middle, lower = tb.BBANDS(close_np_array, timeperiod=20)[-update_size:]
+    boll = tb.BBANDS(close_np_array, timeperiod=20)[-update_size:]
+    upper, middle, lower = boll
 
-    #KDJ
-    k, d = tb.STOCH(np.array(kline_high), np.array(kline_low), close_np_array, fastk_period=9, slowk_period=3, slowk_matype=0, slowd_period=3, slowd_matype=0)[-update_size:]
+    #KDJ, 计算方式https://xueqiu.com/1747761477/198676825
+    k, d = tb.STOCH(np.array(kline_high), np.array(kline_low), close_np_array,
+                     fastk_period=9, slowk_period=(3*2-1), slowk_matype=1, slowd_period=(3*2-1), slowd_matype=1)[-update_size:]
     j = np.subtract(np.multiply(k, 3), np.multiply(d, 2))
 
     #MACD
@@ -128,33 +133,32 @@ def update_socket_indicator(name: str)->int:
     for i in range(len(kline_dates)):
         indicator = api_base.KlineIndicator()
         indicator.date = kline_dates[i]
-        indicator.ma5 = sma5_list[i]
-        indicator.ma10 = sma10_list[i]
-        indicator.ma20 = sma20_list[i]
-        indicator.ma30 = sma30_list[i]
-        indicator.ma60 = sma60_list[i]
-        indicator.ma120 = sma120_list[i]
-        indicator.ma250 = sma250_list[i]
+        indicator.ma5 = 0 if np.isnan(sma5_list[i]) else round(sma5_list[i], 2)
+        indicator.ma10 = 0 if np.isnan(sma10_list[i]) else round(sma10_list[i], 2)
+        indicator.ma20 = 0 if np.isnan(sma20_list[i]) else round(sma20_list[i], 2)
+        indicator.ma30 = 0 if np.isnan(sma30_list[i]) else round(sma30_list[i], 2)
+        indicator.ma60 = 0 if np.isnan(sma60_list[i]) else round(sma60_list[i], 2)
+        indicator.ma120 = 0 if np.isnan(sma120_list[i]) else round(sma120_list[i], 2)
+        indicator.ma250 = 0 if np.isnan(sma250_list[i]) else round(sma250_list[i], 2)
 
-        indicator.boll_low = lower[i]
-        indicator.boll_up = upper[i]
+        indicator.boll_low = 0 if np.isnan(lower[i]) else round(lower[i], 2)
+        indicator.boll_up = 0 if np.isnan(upper[i]) else round(upper[i], 2)
 
-        indicator.k = k[i]
-        indicator.d = d[i]
-        indicator.j = j[i]
+        indicator.k = 0 if np.isnan(k[i]) else round(k[i], 2)
+        indicator.d = 0 if np.isnan(d[i]) else round(d[i], 2)
+        indicator.j = 0 if np.isnan(j[i]) else round(j[i], 2)
 
-        indicator.dif = dif[i]
-        indicator.dea = dea[i]
-        indicator.macd = macd[i] * 2
+        indicator.dif = 0 if np.isnan(dif[i]) else round(dif[i], 2)
+        indicator.dea = 0 if np.isnan(dea[i]) else round(dea[i], 2)
+        indicator.macd = 0 if np.isnan(macd[i]) else round(macd[i] * 2, 2)
 
-        indicator.rsi1 = rsi1[i]
-        indicator.rsi2 = rsi2[i]
-        indicator.rsi3 = rsi3[i]
+        indicator.rsi1 = 0 if np.isnan(rsi1[i]) else round(rsi1[i], 2)
+        indicator.rsi2 = 0 if np.isnan(rsi2[i]) else round(rsi2[i], 2)
+        indicator.rsi3 = 0 if np.isnan(rsi3[i]) else round(rsi3[i], 2)
 
-        indicator.adosc = adosc[i]
+        indicator.adosc = 0 if np.isnan(adosc[i]) else round(adosc[i], 2)
 
-        if i > len(kline_dates) - 5:
-            print(str(indicator))
+        stock_db.write_raw_data(stock_db.get_indicator_table_name(name), stock_db.parse_indicator(indicator))
 
     #写入数据表
 def get_yestoday()->str:

@@ -44,6 +44,8 @@ class StockDB:
         "RSI1":     "REAL",
         "RSI2":     "REAL",
         "RSI3":     "REAL",
+
+        "ADOSC":    "REAL",
     }
 
     def __init__(self) -> None:
@@ -78,13 +80,12 @@ class StockDB:
 
     def get_indicator_table_name(self, name:str):
         return name + "_Ind"
-
+    
     def create_stock_table(self, name: str):
-        #创建原始数据表
-        self.create_table(name, self._stock_raw_table)
-
-        #创建股票指标表
-        self.create_table(self.get_indicator_table_name(name), self._stock_indicator_table)
+        return self.create_table(name, self._stock_raw_table)
+    
+    def create_indicator_table(self, name:str):
+        return self.create_table(self.get_indicator_table_name(name), self._stock_indicator_table)
 
     def parse_kline(self, kline: KlineData)->dict:
         row_data= {
