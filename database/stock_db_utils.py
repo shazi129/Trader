@@ -2,7 +2,9 @@
 
 import os
 import sqlite3
-from api.api_base import KlineData, KlineIndicator
+
+from basic.stock_types import KlineData, KlineIndicator
+
 
 class StockDB:
 
@@ -49,6 +51,7 @@ class StockDB:
     }
 
     def __init__(self) -> None:
+        """构造时连上数据库"""
         self._db_file = '%s/stock_data.db' % os.path.dirname(os.path.abspath(__file__))
         print("open db:" + self._db_file)
 
@@ -59,6 +62,7 @@ class StockDB:
             self._cursor = self._connection.cursor()
 
     def __del__(self):
+        """析构时断开数据库"""
         print("close db:" + self._db_file)
         if self._connection != None:
             self._connection.commit()
@@ -134,7 +138,7 @@ class StockDB:
     def write_raw_data(self, name:str, data:dict):
         keys = ",".join(data.keys())
         values = ",".join([f'\'{item}\'' if isinstance(item, str) else str(item) for item in data.values()])
-        sql = 'INSERT INTO %s(%s) VALUES(%s)' % (name, keys, values)
+        sql = 'INSERT OR REPLACE INTO %s(%s) VALUES(%s)' % (name, keys, values)
         print(sql)
 
         try:
@@ -183,6 +187,7 @@ class StockDB:
             return None
         
     def get_stock_rows(self, name:str)->tuple[int, int]:
+        """获取一个表的K线数目和参数数目"""
         kline_size = self.get_row_num(name)
         indicator_size = self.get_row_num(self.get_indicator_table_name(name))
         return (kline_size, indicator_size)

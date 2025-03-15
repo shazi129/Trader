@@ -27,8 +27,9 @@ if __name__ == "__main__":
     #test_kline_api()
     #test_update_stock_klines()
     #test_talib()
-    #trader_utils.update_stock_data()
-    #trader_utils.update_socket_indicator("Tencent")
     #items = ['2025-02-07', 420.4, 428.2, 432.4, 417.8, 34567530.0, 14741790976.0, 0.38, 0]
     #print(",".join([f'\'{item}\'' if isinstance(item, str) else str(item) for item in items]))
-    trader_utils.update_all_klines()
+    #trader_utils.update_all_klines()
+    #trader_utils.update_stocket("Tencent_14210")
+    #trader_utils.update_stocket("Tencent_27124")
+    trader_utils.update_socket_indicator("Tencent")

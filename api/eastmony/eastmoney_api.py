@@ -12,7 +12,8 @@ https://push2.eastmoney.com/api/qt/stock/trends2/get?fields1=f1,f2,f3,f4,f5,f6,f
 import datetime
 import requests
 import json
-from api.api_base import KlineData, StockAPI, StockList, StockMarket
+from api.api_base import StockAPI
+from basic.stock_types import KlineData, StockList, StockMarket
 
 class EastMoneyAPI(StockAPI):
     def __init__(self):
