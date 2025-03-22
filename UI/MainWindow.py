@@ -13,9 +13,8 @@ class MainWindow(QMainWindow):
         self.mainWindow.moduleList.addItem("关于")
         self.mainWindow.moduleList.itemClicked.connect(self.on_list_item_clicked)
 
-        #在窗口的右侧初始化一个UpdateModuleWidget
         self.updateModuleWidget = UpdateModuleWidget()
-        self.setCentralWidget(self.updateModuleWidget)
+        self.mainWindow.moduleArea.addChildWidget(self.updateModuleWidget)
 
 
     def on_list_item_clicked(self, item):

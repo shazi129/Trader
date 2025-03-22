@@ -24,6 +24,17 @@
      </rect>
     </property>
    </widget>
+   <widget class="QWidget" name="verticalLayoutWidget">
+    <property name="geometry">
+     <rect>
+      <x>220</x>
+      <y>40</y>
+      <width>471</width>
+      <height>391</height>
+     </rect>
+    </property>
+    <layout class="QVBoxLayout" name="moduleArea"/>
+   </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
