@@ -12,8 +12,9 @@ https://push2.eastmoney.com/api/qt/stock/trends2/get?fields1=f1,f2,f3,f4,f5,f6,f
 import datetime
 import requests
 import json
-from api.api_base import StockAPI
-from basic.stock_types import KlineData, StockList, StockMarket
+from API.APIBase import StockAPI
+import Config
+from StockInfo import KlineData, StockMarket
 
 class EastMoneyAPI(StockAPI):
     def __init__(self):
@@ -44,7 +45,7 @@ class EastMoneyAPI(StockAPI):
         }
 
     def get_secid(self, name:str)-> str:
-        stock = StockList[name]
+        stock = Config.global_stock_list[name]
         match stock.market:
             case StockMarket.SH:
                 return "0.%s" % stock.code

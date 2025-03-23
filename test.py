@@ -1,18 +1,17 @@
-import trader_utils
+import TraderUtils
 import talib
 import numpy
-from api import api_base
 from datetime import datetime
 
 
 def test_kline_api():
-    print("\n".join([str(item) for item in trader_utils.get_day_klines(
+    print("\n".join([str(item) for item in TraderUtils.get_day_klines(
         "Tencent",
         datetime.strptime("2025-01-24","%Y-%m-%d"),
         datetime.strptime("2025-02-05","%Y-%m-%d"))]))
 
 def test_update_stock_klines():
-    trader_utils.update_stock_klines("Tencent")
+    TraderUtils.update_stock_klines("Tencent")
 
 
 def test_talib():
@@ -30,7 +29,7 @@ if __name__ == "__main__":
     #items = ['2025-02-07', 420.4, 428.2, 432.4, 417.8, 34567530.0, 14741790976.0, 0.38, 0]
     #print(",".join([f'\'{item}\'' if isinstance(item, str) else str(item) for item in items]))
     #trader_utils.update_all_klines()
-    trader_utils.update_stocket("Tencent_14136")
-    trader_utils.update_stocket("Tencent_14210")
-    trader_utils.update_stocket("Tencent_27124")
+    TraderUtils.update_stocket("Tencent_14136")
+    TraderUtils.update_stocket("Tencent_14210")
+    TraderUtils.update_stocket("Tencent_27124")
     #trader_utils.update_socket_indicator("Tencent")

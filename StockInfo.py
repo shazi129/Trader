@@ -11,7 +11,8 @@ class StockMarket(Enum):
 
 #股票信息抽象
 class StockInfo:
-    def __init__(self, code:str, market: StockMarket, listing_date:str, is_derivative:bool=False) -> None:
+    def __init__(self, name: str, code:str, market: StockMarket, listing_date:str, is_derivative:bool=False) -> None:
+        self.name:str = name #股票名称
         self.code:str = code #股票代码
         self.market: StockMarket = market #所属市场
         self.listing_date:str = listing_date #上市日期
@@ -19,17 +20,6 @@ class StockInfo:
 
     def get_list_date(self)->datetime.datetime:
         return datetime.datetime.strptime(self.listing_date, "%Y-%m-%d")
-
-#当前用到的股票信息配置
-StockList: dict[str, StockInfo] = {
-    "Tencent": StockInfo('00700',  StockMarket.HK, "2004-06-16"),
-    "Tencent_14136": StockInfo('14136',  StockMarket.HK, "2025-02-25", True),
-    "Tencent_14210": StockInfo('14210',  StockMarket.HK, "2025-02-26", True),
-    "Tencent_27124": StockInfo('27124',  StockMarket.HK, "2024-09-03", True),
-
-    "Alibaba": StockInfo('09988', StockMarket.HK, "2019-11-26"),
-    "COMEX_AG": StockInfo('SI00Y', StockMarket.COMEX, "2011-07-22"),
-}
 
 #K线信息
 class KlineData:
@@ -109,3 +99,12 @@ k:%f, d:%f, j:%f, dif:%f, dea:%f, macd:%f, rsi1:%f, rsi2:%f, rsi3:%f, adosc:%f" 
             self.date, self.ma5, self.ma10, self.ma20, self.ma30, self.ma60, self.ma120, self.ma250,
             self.boll_up, self.boll_low, self.k, self.d, self.j, self.dif, self.dea, self.macd,
             self.rsi1, self.rsi2, self.rsi3, self.adosc)
+    
+
+class DataValue:
+    def __init__(self, date:str, value:float) -> None:
+        self.date = date
+        self.value = value
+
+    def __str__(self) -> str:
+        return "date:%s, value:%f" % (self.date, self.value)

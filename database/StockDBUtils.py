@@ -3,7 +3,7 @@
 import os
 import sqlite3
 
-from basic.stock_types import KlineData, KlineIndicator
+from StockInfo import DataValue, KlineData, KlineIndicator
 
 
 class StockDB:
@@ -191,3 +191,19 @@ class StockDB:
         kline_size = self.get_row_num(name)
         indicator_size = self.get_row_num(self.get_indicator_table_name(name))
         return (kline_size, indicator_size)
+    
+    def get_stock_ratio_data(self, denominator_key:str, numerator_key:str)->list[DataValue]:
+        """获取股票收盘价的比值数据"""
+        sql = f"SELECT {denominator_key}.Date, {denominator_key}.Close/{numerator_key}.Close FROM {denominator_key} INNER JOIN {numerator_key} ON {denominator_key}.Date = {numerator_key}.Date"
+        print(sql)
+        try:
+            self._cursor.execute(sql)
+            all_data = self._cursor.fetchall()
+            result: list[DataValue] = []
+            for row in all_data:
+                data = DataValue(str(row[0]), row[1])
+                result.append(data)
+            return result
+        except sqlite3.IntegrityError as e:
+            print("get_stock_ratio_data error: ", e.sqlite_errorname)
+            return None
