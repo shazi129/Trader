@@ -3,7 +3,7 @@
 import os
 import sqlite3
 
-from StockInfo import DataValue, KlineData, KlineIndicator
+from stock_info import DataValue, KlineData, KlineIndicator
 
 
 class StockDB:

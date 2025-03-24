@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QMainWindow
-from UI.Designer.Ui_MainWindow import Ui_MainWindow
-from UI.RatioDisplayWidget import RatioDisplayWidget
-from UI.UpdateModuleWidget import UpdateModuleWidget
+from ui.designer.Ui_MainWindow import Ui_MainWindow
+from ui.ratio_display_widget import RatioDisplayWidget
+from ui.update_widget import UpdateModuleWidget
 
 class MainWindow(QMainWindow):
     def __init__(self):

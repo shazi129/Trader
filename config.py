@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 #!/usr/bin/env python
 
-from API.Eastmony.EastmoneyAPI import EastMoneyAPI
-from StockInfo import StockInfo, StockMarket
+from api.eastmony.eastmoney_api import EastMoneyAPI
+from stock_info import StockInfo, StockMarket
 
 STOCK_API_CLASS = EastMoneyAPI
 

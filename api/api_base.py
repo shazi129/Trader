@@ -2,7 +2,7 @@
 #!/usr/bin/env python
 
 import datetime
-from StockInfo import KlineData
+from stock_info import KlineData
 
 class StockAPI:
     """所有API的基类"""

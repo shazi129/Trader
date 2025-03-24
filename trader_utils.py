@@ -2,16 +2,16 @@
 #!/usr/bin/env python
 
 from datetime import datetime, timedelta
-from API import APIBase
-from StockInfo import KlineIndicator, StockInfo
-import Config
-from Database import StockDBUtils
+from api import api_base
+from stock_info import KlineIndicator
+import config
+from database import stock_db_utils
 import talib as tb
 import numpy as np
 
-def get_day_klines(name: str, start: datetime, end: datetime) -> list[APIBase.KlineData]:
+def get_day_klines(name: str, start: datetime, end: datetime) -> list[api_base.KlineData]:
     """获取一个股票的日k线"""
-    stock_api = Config.STOCK_API_CLASS()
+    stock_api = config.STOCK_API_CLASS()
     return stock_api.get_day_klines(name, start, end)
 
 def get_date_span(latest_date, span):
@@ -24,12 +24,12 @@ def get_date_span(latest_date, span):
 def update_stock_klines(name: str)->int:
     """更新一个k线数据库"""
 
-    stock_info = Config.global_stock_list[name]
+    stock_info = config.global_stock_list[name]
     if stock_info == None:
         print("update_stock_klines error, invalid name: %s" % name)
         return 0
 
-    stock_db = StockDBUtils.StockDB()
+    stock_db = stock_db_utils.StockDB()
     stock_db.create_stock_table(name)
 
     #拿到开始时间与结束时间
@@ -60,12 +60,12 @@ def update_stock_klines(name: str)->int:
         begin_date = end_date + timedelta(days=1)
 
 def update_socket_indicator(name: str)->int:
-    stock_info = Config.global_stock_list[name]
+    stock_info = config.global_stock_list[name]
     if stock_info == None:
         print("update_stock_db error, invalid name: %s" % name)
         return 0
     
-    stock_db = StockDBUtils.StockDB()
+    stock_db = stock_db_utils.StockDB()
     stock_db.create_indicator_table(name)
 
     kline_size, indicator_size = stock_db.get_stock_rows(name)
@@ -160,7 +160,7 @@ def get_yestoday()->str:
     return (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
 def update_stocket(stock_key:str):
-    if (stock_key not in Config.global_stock_list):
+    if (stock_key not in config.global_stock_list):
         print("update_stocket error, cannot stock info by name: %s" % stock_key)
         return 0
     
@@ -168,15 +168,15 @@ def update_stocket(stock_key:str):
     update_stock_klines(stock_key)
 
     #衍生品不需要参数
-    if (not Config.global_stock_list[stock_key].is_derivative):
+    if (not config.global_stock_list[stock_key].is_derivative):
         update_socket_indicator(stock_key)
 
 def update_all_stocks():
-    for stock_key in Config.global_stock_list:
+    for stock_key in config.global_stock_list:
         update_stocket(stock_key)
 
 def get_ratio_data(denominator_key:str, numerator_key:str):
-    stock_db = StockDBUtils.StockDB()
+    stock_db = stock_db_utils.StockDB()
     result = stock_db.get_stock_ratio_data(denominator_key, numerator_key)
     for item in result:
         print(item)

@@ -1,8 +1,8 @@
 
-import Config
-import TraderUtils
+import config
+import trader_utils
 from PySide6.QtWidgets import QWidget
-from UI.Designer.Ui_UpdateModule import Ui_UpdateModule
+from ui.designer.Ui_UpdateModule import Ui_UpdateModule
 
 class UpdateModuleWidget(QWidget):
     def __init__(self):
@@ -14,8 +14,8 @@ class UpdateModuleWidget(QWidget):
 
         #初始化下拉框
         self.updateSockIndex = 0
-        self.stock_keys = [key for key in Config.global_stock_list]
-        self.updateModule.comboBox.addItems([Config.global_stock_list[key].name for key in self.stock_keys])
+        self.stock_keys = [key for key in config.global_stock_list]
+        self.updateModule.comboBox.addItems([config.global_stock_list[key].name for key in self.stock_keys])
         self.updateModule.comboBox.currentIndexChanged.connect(self.on_combobox_index_changed)
 
     def on_combobox_index_changed(self, index):
@@ -25,8 +25,8 @@ class UpdateModuleWidget(QWidget):
 
     def on_update_all_clicked(self):
         print("update all clicked")
-        TraderUtils.update_all_stocks()
+        trader_utils.update_all_stocks()
 
     def on_update_clicked(self):
         print("update clicked, {self.stockKeyList[self.updateSockIndex]}")
-        TraderUtils.update_stocket(self.stock_keys[self.updateSockIndex])
+        trader_utils.update_stocket(self.stock_keys[self.updateSockIndex])
