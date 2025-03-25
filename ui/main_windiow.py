@@ -1,5 +1,7 @@
 from PySide6.QtWidgets import QMainWindow
+import numpy as np
 from ui.designer.Ui_MainWindow import Ui_MainWindow
+from ui.matplot.matplot_widget import MatplotlibWidget
 from ui.ratio_display_widget import RatioDisplayWidget
 from ui.update_widget import UpdateModuleWidget
 
@@ -25,6 +27,12 @@ class MainWindow(QMainWindow):
         self.module_widgets.append(self.ratio_display_widget)
         self.mainWindow.moduleArea.addChildWidget(self.ratio_display_widget)
         self.ratio_display_widget.setVisible(False)
+
+        x = np.linspace(-10, 10, 1000)
+
+        # 创建 MatplotlibWidget 实例
+        self.matplotlib_widget = MatplotlibWidget('sin(x)', [(i, np.sin(i)) for i in x])
+        self.setCentralWidget(self.matplotlib_widget)
 
     def on_list_item_clicked(self, item):
         index = self.mainWindow.moduleList.row(item)
