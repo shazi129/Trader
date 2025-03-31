@@ -2,7 +2,8 @@
 import config
 import trader_utils
 from PySide6.QtWidgets import QWidget
-from ui.designer.Ui_UpdateModule import Ui_UpdateModule
+
+from ui.designer.gen.update_widget_generated import Ui_UpdateModule
 
 class UpdateModuleWidget(QWidget):
     def __init__(self):

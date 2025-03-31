@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QMainWindow
 import numpy as np
-from ui.designer.Ui_MainWindow import Ui_MainWindow
+from ui.designer.gen.main_window_generated import Ui_MainWindow
 from ui.matplot.matplot_widget import MatplotlibWidget
 from ui.ratio_display_widget import RatioDisplayWidget
 from ui.update_widget import UpdateModuleWidget

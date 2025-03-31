@@ -136,7 +136,7 @@ class Logger(object):
             module = Log.pref
         if Log.enable:
             Log.create(module).log(logging.CRITICAL, msg)
-
+            
 if __name__ == "__main__":
     Logger.debug("debug")
     Logger.info("info")

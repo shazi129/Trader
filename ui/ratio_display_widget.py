@@ -2,7 +2,8 @@
 import config
 import trader_utils
 from PySide6.QtWidgets import QWidget
-from ui.designer.Ui_RatioDisplayWidget import Ui_ratioDisplayWidget
+
+from ui.designer.gen.ratio_display_wdiget_generated import Ui_ratioDisplayWidget
 
 class RatioDisplayWidget(QWidget):
     def __init__(self):
