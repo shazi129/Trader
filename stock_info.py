@@ -53,7 +53,7 @@ class KlineData:
         return True
 
     def __str__(self) -> str:
-        return "date:%s, open:%f, close:%f, high:%f, low:%f, volume:%f, turnover:%f, turnover_rate:%f, pe:%f" % (
+        return "date:%s, open:%f, close:%f, high:%f, low:%f, volume:%f, turnover:%f, turnover_rate:%f" % (
             self.date, self.open, self.close, self.high, self.low, self.volume, self.turnover, self.turnover_rate, self.pe
         )
     

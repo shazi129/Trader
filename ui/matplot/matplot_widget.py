@@ -10,9 +10,9 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget
 
 
 class MatplotlibWidget(QWidget):
-    def __init__(self, name: str, points: List[Tuple[float, float]]):
+    def __init__(self):
         super().__init__()
-        plt.rcParams['font.size'] = 14  # 字体大小
+        plt.rcParams['font.size'] = 8  # 字体大小
         plt.rcParams['axes.unicode_minus'] = False  # 解决负号 '-' 显示为方块的问题
 
         # 创建 Matplotlib 图形
@@ -28,10 +28,7 @@ class MatplotlibWidget(QWidget):
         layout.addWidget(self.canvas)
         self.setLayout(layout)
 
-        # 绘制函数曲线
-        self.plot(name, points)
-
-    def plot(self, name: str, points: List[Tuple[float, float]]):
+    def show(self, name: str, points: List[Tuple[float, float]]):
         # 清空之前的图形
         self.ax.clear()
 

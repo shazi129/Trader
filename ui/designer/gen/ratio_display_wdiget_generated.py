@@ -22,7 +22,7 @@ class Ui_ratioDisplayWidget(object):
     def setupUi(self, ratioDisplayWidget):
         if not ratioDisplayWidget.objectName():
             ratioDisplayWidget.setObjectName(u"ratioDisplayWidget")
-        ratioDisplayWidget.resize(665, 496)
+        ratioDisplayWidget.resize(665, 71)
         self.label = QLabel(ratioDisplayWidget)
         self.label.setObjectName(u"label")
         self.label.setGeometry(QRect(160, 20, 16, 21))

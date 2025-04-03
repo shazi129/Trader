@@ -45,7 +45,7 @@ class EastMoneyAPI(StockAPI):
         }
 
     def get_secid(self, name:str)-> str:
-        stock = Config.global_stock_list[name]
+        stock = config.global_stock_list[name]
         match stock.market:
             case StockMarket.SH:
                 return "0.%s" % stock.code

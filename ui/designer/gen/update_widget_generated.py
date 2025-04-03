@@ -22,13 +22,13 @@ class Ui_UpdateModule(object):
     def setupUi(self, UpdateModule):
         if not UpdateModule.objectName():
             UpdateModule.setObjectName(u"UpdateModule")
-        UpdateModule.resize(400, 300)
+        UpdateModule.resize(400, 106)
         self.comboBox = QComboBox(UpdateModule)
         self.comboBox.setObjectName(u"comboBox")
         self.comboBox.setGeometry(QRect(50, 30, 131, 22))
         self.pushButton = QPushButton(UpdateModule)
         self.pushButton.setObjectName(u"pushButton")
-        self.pushButton.setGeometry(QRect(70, 100, 75, 24))
+        self.pushButton.setGeometry(QRect(50, 70, 75, 24))
         self.label = QLabel(UpdateModule)
         self.label.setObjectName(u"label")
         self.label.setGeometry(QRect(10, 30, 54, 16))

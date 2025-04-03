@@ -27,13 +27,24 @@
    <widget class="QWidget" name="verticalLayoutWidget">
     <property name="geometry">
      <rect>
-      <x>220</x>
-      <y>40</y>
-      <width>471</width>
-      <height>391</height>
+      <x>210</x>
+      <y>10</y>
+      <width>541</width>
+      <height>111</height>
      </rect>
     </property>
-    <layout class="QVBoxLayout" name="moduleArea"/>
+    <layout class="QVBoxLayout" name="ModuleArea"/>
+   </widget>
+   <widget class="QWidget" name="verticalLayoutWidget_2">
+    <property name="geometry">
+     <rect>
+      <x>210</x>
+      <y>140</y>
+      <width>541</width>
+      <height>341</height>
+     </rect>
+    </property>
+    <layout class="QVBoxLayout" name="GraphArea"/>
    </widget>
   </widget>
   <widget class="QMenuBar" name="menubar">
