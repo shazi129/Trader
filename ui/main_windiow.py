@@ -1,9 +1,11 @@
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QMainWindow, QVBoxLayout
 import numpy as np
 from ui.designer.gen.main_window_generated import Ui_MainWindow
 from ui.matplot.matplot_widget import MatplotlibWidget
+from ui.pyqtgraph.qtgraph_widget import QTGraphWidget
 from ui.ratio_display_widget import RatioDisplayWidget
 from ui.update_widget import UpdateModuleWidget
+from ui.pyqtgraph.qtgraph_widget import QTGraphWidget;
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -28,12 +30,12 @@ class MainWindow(QMainWindow):
         self.mainWindow.ModuleArea.addChildWidget(self.ratio_display_widget)
         self.ratio_display_widget.setVisible(False)
 
-        # 创建 MatplotlibWidget 实例
-        x = np.linspace(-10, 10, 1000)
-        self.matplotlib_widget = MatplotlibWidget()
-        self.mainWindow.GraphArea.addChildWidget(self.matplotlib_widget)
-        self.matplotlib_widget.show('sin(x)', [(i, np.sin(i)) for i in x])
-        #self.setCentralWidget(self.matplotlib_widget)
+        self.plot_widget = QTGraphWidget()
+        self.plot_widget.setObjectName(u"QTGraphWidget")
+        self.plot_widget.setContentsMargins(0, 0, 0, 0)
+        self.mainWindow.GraphArea.addWidget(self.plot_widget)
+
+    
 
     def on_list_item_clicked(self, item):
         index = self.mainWindow.moduleList.row(item)

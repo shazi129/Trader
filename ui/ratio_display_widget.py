@@ -38,5 +38,6 @@ class RatioDisplayWidget(QWidget):
             print("分子分母不能相同")
             return
         print(f"show ratio clicked, {self.stock_keys[self.numerator_index]}, {self.stock_keys[self.denominator_index]}")
-
-        trader_utils.get_ratio_data(self.stock_keys[self.numerator_index], self.stock_keys[self.denominator_index])
+        ratio_data = trader_utils.get_ratio_data(self.stock_keys[self.numerator_index], self.stock_keys[self.denominator_index])
+        for item in ratio_data:
+            print(item)

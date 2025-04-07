@@ -178,6 +178,4 @@ def update_all_stocks():
 def get_ratio_data(denominator_key:str, numerator_key:str):
     stock_db = stock_db_utils.StockDB()
     result = stock_db.get_stock_ratio_data(denominator_key, numerator_key)
-    for item in result:
-        print(item)
-
+    return result
