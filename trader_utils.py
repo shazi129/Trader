@@ -3,7 +3,7 @@
 
 from datetime import datetime, timedelta
 from api import api_base
-from stock_info import KlineIndicator
+from stock_info import KlineIndicator, StockMarket
 import config
 from database import stock_db_utils
 import talib as tb
@@ -41,13 +41,18 @@ def update_stock_klines(name: str)->int:
     if begin_date < listing_date:
         begin_date = listing_date
 
-    #结束时间为昨天
-    yesdoday = datetime.now() - timedelta(days=1)
+    now = datetime.now()
+    latestDay = now - timedelta(days=1) #默认拉昨天的数据
+
+    if stock_info.market == StockMarket.HK and now.hour >= 16:
+        latestDay = now
+    if (stock_info.market == StockMarket.SH or stock_info.market == StockMarket.SZ) and now.hour >= 17:
+        latestDay = now
 
     count:int = 0
-    while((yesdoday - begin_date).days >= 0):
-        delta_day = (yesdoday - begin_date).days
-        end_date = yesdoday
+    while((latestDay - begin_date).days >= 0):
+        delta_day = (latestDay - begin_date).days
+        end_date = latestDay
         if delta_day > 200:
             end_date = begin_date + timedelta(days=200)
 

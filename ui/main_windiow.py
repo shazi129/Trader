@@ -1,11 +1,13 @@
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout
 import numpy as np
+import config
 from ui.designer.gen.main_window_generated import Ui_MainWindow
 from ui.matplot.matplot_widget import MatplotlibWidget
 from ui.pyqtgraph.qtgraph_widget import QTGraphWidget
 from ui.ratio_display_widget import RatioDisplayWidget
 from ui.update_widget import UpdateModuleWidget
-from ui.pyqtgraph.qtgraph_widget import QTGraphWidget;
+from ui.pyqtgraph.qtgraph_widget import QTGraphWidget
+from utils.event_system import EventSystem;
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -35,7 +37,7 @@ class MainWindow(QMainWindow):
         self.plot_widget.setContentsMargins(0, 0, 0, 0)
         self.mainWindow.GraphArea.addWidget(self.plot_widget)
 
-    
+        EventSystem.get_instance().register_listner(config.EventID.SHOW_DATA, self.on_show_data)
 
     def on_list_item_clicked(self, item):
         index = self.mainWindow.moduleList.row(item)
@@ -45,3 +47,11 @@ class MainWindow(QMainWindow):
                 widget.setVisible(True)
             else:
                 widget.setVisible(False)
+
+    def on_show_data(self, data):
+        if (data is None):
+            return
+        
+        print(f"show data: {data}")
+        self.plot_widget.clear()
+        #elf.plot_widget.plot(data)
