@@ -2,16 +2,16 @@
 #!/usr/bin/env python
 
 from datetime import datetime, timedelta
-from api import api_base
-from stock_info import KlineIndicator, StockMarket
+from stock_info import KlineIndicator, StockMarket, KlineData
 import config
 from database import stock_db_utils
 import talib as tb
 import numpy as np
+import api
 
-def get_day_klines(name: str, start: datetime, end: datetime) -> list[api_base.KlineData]:
+def get_day_klines(name: str, start: datetime, end: datetime) -> list[KlineData]:
     """获取一个股票的日k线"""
-    stock_api = config.STOCK_API_CLASS()
+    stock_api = api.eastmoney.EastMoneyAPI()
     return stock_api.get_day_klines(name, start, end)
 
 def get_date_span(latest_date, span):
