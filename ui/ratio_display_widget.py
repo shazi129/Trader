@@ -41,10 +41,4 @@ class RatioDisplayWidget(QWidget):
         print(f"show ratio clicked, {self.stock_keys[self.numerator_index]}, {self.stock_keys[self.denominator_index]}")
         ratio_data = trader_utils.get_ratio_data(self.stock_keys[self.numerator_index], self.stock_keys[self.denominator_index])
 
-        show_data = config.create_show_data()
-        show_data["values"]["ratio"] = []
-        for ratio in ratio_data:
-            show_data["date"].append(ratio.date)
-            show_data["values"]["ratio"].append(ratio.value)
-
-        EventSystem.get_instance().notify_listeners(config.EventID.SHOW_DATA, show_data)
+        EventSystem.get_instance().notify_listeners(config.EventID.SHOW_DATA, ratio_data)

@@ -2,11 +2,9 @@ from PySide6.QtWidgets import QMainWindow, QVBoxLayout
 import numpy as np
 import config
 from ui.designer.gen.main_window_generated import Ui_MainWindow
-from ui.matplot.matplot_widget import MatplotlibWidget
 from ui.pyqtgraph.qtgraph_widget import QTGraphWidget
 from ui.ratio_display_widget import RatioDisplayWidget
 from ui.update_widget import UpdateModuleWidget
-from ui.pyqtgraph.qtgraph_widget import QTGraphWidget
 from utils.event_system import EventSystem;
 
 class MainWindow(QMainWindow):
@@ -48,10 +46,12 @@ class MainWindow(QMainWindow):
             else:
                 widget.setVisible(False)
 
-    def on_show_data(self, data):
-        if (data is None):
+    def on_show_data(self, datas):
+        if (datas is None):
             return
         
-        print(f"show data: {data}")
+        for data in datas:
+            print(f"{data.date}, {data.value}")
+            
         self.plot_widget.clear()
         #elf.plot_widget.plot(data)
