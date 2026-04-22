@@ -3,11 +3,12 @@ Windows 11 浮空股票报价小控件 (PySide6)
 - 极简到极致：仅显示价格
 - 半透明、无边框、置顶、可拖动
 - 右键菜单退出/刷新/打开配置
-- 使用东方财富推送接口，国内直连无需翻墙
+- 使用腾讯财经接口，国内直连无需翻墙
 """
 
 import sys
 import json
+import re
 import urllib.request
 from pathlib import Path
 from dataclasses import dataclass
@@ -22,9 +23,18 @@ from PySide6.QtGui import QFont, QAction, QCursor
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
+@dataclass
+class StockConfig:
+    """单只股票的配置"""
+    stock_code: str     # 腾讯接口代码: hk00700, sh600519, sz000001, usAAPL
+    name: str           # 自定义显示名
+    show: bool          # 是否在 widget 上显示
+
 def load_config() -> dict:
     default = {
-        "secid": "116.00700",       # 东方财富 secid: 116.港股, 1.沪股, 0.深股, 105.美股
+        "stocks": [
+            {"stock_code": "hk00700", "name": "腾讯", "show": True},
+        ],
         "refresh_interval": 5,
         "opacity": 0.75,
         "font_size": 12,
@@ -33,10 +43,27 @@ def load_config() -> dict:
     if CONFIG_PATH.exists():
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                default.update(json.load(f))
+                cfg = json.load(f)
+                # 兼容旧配置：单个 stock_code 转为 stocks 数组
+                if "stock_code" in cfg and "stocks" not in cfg:
+                    code = cfg.pop("stock_code")
+                    cfg["stocks"] = [{"stock_code": code, "name": code, "show": True}]
+                default.update(cfg)
         except Exception:
             pass
+    # 将 stocks 字典列表转为 StockConfig 对象列表
+    default["stocks"] = [
+        StockConfig(**s) if not isinstance(s, StockConfig) else s
+        for s in default["stocks"]
+    ]
     return default
+
+def get_active_stock(config: dict) -> StockConfig | None:
+    """获取当前 show=True 的股票配置，返回第一个匹配的"""
+    for s in config["stocks"]:
+        if s.show:
+            return s
+    return None
 
 # ---------------------------------------------------------------------------
 # 数据模型
@@ -44,7 +71,7 @@ def load_config() -> dict:
 
 @dataclass
 class StockQuote:
-    """东方财富接口返回的行情快照"""
+    """腾讯财经接口返回的行情快照"""
     name: str           # 中文名
     code: str           # 证券代码
     price: float        # 最新价
@@ -56,72 +83,86 @@ class StockQuote:
     currency: str       # 币种
 
 # ---------------------------------------------------------------------------
-# 数据获取线程（东方财富推送接口）
+# 数据获取线程（腾讯财经接口）
 # ---------------------------------------------------------------------------
 
-_EASTMONEY_URL = "https://push2.eastmoney.com/api/qt/stock/get"
-_EASTMONEY_FIELDS = "f57,f58,f59,f43,f44,f45,f46,f60,f169,f170,f172"
+_TENCENT_URL = "https://qt.gtimg.cn/q="
 
 class FetchThread(QThread):
     result_ready = Signal(object)  # StockQuote | None
 
-    def __init__(self, secid: str, parent=None):
+    def __init__(self, stock_code: str, parent=None):
         super().__init__(parent)
-        self.secid = secid
+        self.stock_code = stock_code
 
     def run(self):
         """
-        东方财富推送接口:
-          secid 格式: 116.00700 (港股), 1.600519 (沪股), 0.000001 (深股), 105.AAPL (美股)
-          关键字段:
-            f57=代码, f58=名称, f59=小数位数(价格scale=10^f59)
-            f43=最新价, f44=最高, f45=最低, f46=今开, f60=昨收
-            f169=涨跌额, f170=涨跌幅(×100), f172=币种
+        腾讯财经行情接口:
+          URL: https://qt.gtimg.cn/q=<stock_code>
+          stock_code 格式: hk00700(港股), sh600519(沪股), sz000001(深股), usAAPL(美股)
+
+          返回格式为 v_<code>="字段1~字段2~...~字段N";
+          实际字段顺序(~分隔, 从0开始):
+            0=未知, 1=名称, 2=代码, 3=最新价, 4=涨跌额, 5=涨跌幅(%),
+            6=最高, 7=最低, ...
+          所有市场使用相同的字段顺序，需要根据最新价和涨跌额计算昨收价
         """
         quote = None
         try:
-            url = (
-                f"{_EASTMONEY_URL}?"
-                f"ut=6d2ffaa6a585d612eda28417681d58fb"
-                f"&fields={_EASTMONEY_FIELDS}"
-                f"&secid={self.secid}"
-                f"&invt=2"
-            )
+            url = f"{_TENCENT_URL}{self.stock_code}"
             req = urllib.request.Request(url, headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Referer": "https://quote.eastmoney.com",
+                "Referer": "https://finance.qq.com",
             })
             resp = urllib.request.urlopen(req, timeout=8)
-            raw = resp.read().decode("utf-8")
-            data = json.loads(raw).get("data")
-            if not data:
+            raw = resp.read().decode("gbk")
+
+            # 解析响应: v_hk00700="xxx~xxx~...";
+            match = re.search(r'"([^"]+)"', raw)
+            if not match:
                 self.result_ready.emit(None)
                 return
 
-            # f59 = 小数位数, scale = 10^f59
-            f59 = data.get("f59", 2)
-            scale = 10 ** f59 if isinstance(f59, int) else 100
+            fields = match.group(1).split("~")
+            if len(fields) < 10:
+                self.result_ready.emit(None)
+                return
 
-            def _s(key: str) -> float:
-                """按 scale 缩放价格字段"""
-                v = data.get(key, 0)
-                return round(v / scale, f59) if isinstance(v, (int, float)) else 0.0
+            market = self.stock_code[:2].lower()
+            quote = self._parse_by_market(market, fields)
 
-            quote = StockQuote(
-                name=str(data.get("f58", "")),
-                code=str(data.get("f57", "")),
-                price=_s("f43"),
-                prev_close=_s("f60"),
-                change=_s("f169"),
-                change_pct=round(data.get("f170", 0) / 100, 2) if isinstance(data.get("f170"), (int, float)) else 0.0,
-                high=_s("f44"),
-                low=_s("f45"),
-                currency=str(data.get("f172", "")),
-            )
         except Exception as e:
             print(f"[FetchThread] error: {e}")
             quote = None
         self.result_ready.emit(quote)
+
+    def _parse_by_market(self, market: str, fields: list) -> StockQuote | None:
+        """
+        根据市场类型解析字段。腾讯接口所有市场的字段布局实际一致:
+          3=最新价, 4=昨收, 5=今开, 6=成交量, ...
+          31=涨跌额, 32=涨跌幅(%), 33=最高, 34=最低
+        """
+        try:
+            currency_map = {"hk": "HKD", "us": "USD"}
+            currency = currency_map.get(market, "CNY")
+
+            price = float(fields[3]) if len(fields) > 3 else 0.0
+            prev_close = float(fields[4]) if len(fields) > 4 else 0.0
+
+            return StockQuote(
+                name=fields[1] if len(fields) > 1 else "",
+                code=fields[2] if len(fields) > 2 else "",
+                price=price,
+                prev_close=prev_close,
+                change=float(fields[31]) if len(fields) > 31 else 0.0,
+                change_pct=float(fields[32]) if len(fields) > 32 else 0.0,
+                high=float(fields[33]) if len(fields) > 33 else 0.0,
+                low=float(fields[34]) if len(fields) > 34 else 0.0,
+                currency=currency,
+            )
+        except (ValueError, IndexError) as e:
+            print(f"[FetchThread] parse error ({market}): {e}")
+            return None
 
 # ---------------------------------------------------------------------------
 # 主控件
@@ -212,20 +253,32 @@ class StockWidget(QWidget):
     def _fetch(self):
         if self._fetching:
             return
+
+        active = get_active_stock(self.config)
+        if active is None:
+            self.label.setText("--")
+            return
+
         self._fetching = True
 
         # 清理上一轮残留线程
         self._cleanup_thread()
 
-        self._thread = FetchThread(self.config["secid"], parent=None)
+        self._thread = FetchThread(active.stock_code, parent=None)
         self._thread.result_ready.connect(self._on_data, Qt.QueuedConnection)
         self._thread.finished.connect(self._on_thread_finished, Qt.QueuedConnection)
         self._thread.start()
 
     def _on_data(self, quote):
-        """收到 StockQuote 或 None"""
+        """收到 StockQuote 或 None，展示格式: 507.0|+3.5 或 507.0|-2.0"""
         if quote is not None and isinstance(quote, StockQuote):
-            self.label.setText(f"{quote.price}")
+            if quote.change > 0:
+                change_str = f"+{quote.change}"
+            elif quote.change < 0:
+                change_str = f"{quote.change}"
+            else:
+                change_str = "0"
+            self.label.setText(f"{quote.price}|{change_str}")
         else:
             self.label.setText("--")
         # 自适应大小
@@ -252,7 +305,17 @@ class StockWidget(QWidget):
         menu.setStyleSheet("""
             QMenu { background: #2a2a2a; color: #ccc; border: 1px solid #444; }
             QMenu::item:selected { background: #3a3a3a; }
+            QMenu::item:checked { color: #4fc3f7; }
         """)
+
+        # 股票切换子菜单
+        stock_menu = menu.addMenu("切换股票")
+        for stock in self.config["stocks"]:
+            action = QAction(f"{'✔ ' if stock.show else '   '}{stock.name} ({stock.stock_code})", self)
+            action.triggered.connect(lambda checked, s=stock: self._switch_stock(s))
+            stock_menu.addAction(action)
+
+        menu.addSeparator()
 
         refresh_action = QAction("刷新", self)
         refresh_action.triggered.connect(self._fetch)
@@ -269,6 +332,13 @@ class StockWidget(QWidget):
         menu.addAction(quit_action)
 
         menu.exec(QCursor.pos())
+
+    def _switch_stock(self, target: StockConfig):
+        """切换显示的股票：将目标设为 show=True，其余设为 False，并立即刷新"""
+        for s in self.config["stocks"]:
+            s.show = (s is target)
+        self.label.setText("--")
+        self._fetch()
 
 # ---------------------------------------------------------------------------
 # 入口

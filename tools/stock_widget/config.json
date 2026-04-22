@@ -1,6 +1,27 @@
 {
-    "secid": "116.00700",
-    "refresh_interval": 10,
+    "stocks": [
+        {
+            "stock_code": "hk00700",
+            "name": "腾讯",
+            "show": true
+        },
+        {
+            "stock_code": "hk09988",
+            "name": "阿里巴巴",
+            "show": false
+        },
+        {
+            "stock_code": "sh518880",
+            "name": "白银基金",
+            "show": false
+        },
+        {
+            "stock_code": "sh000001",
+            "name": "上证指数",
+            "show": false
+        }
+    ],
+    "refresh_interval": 60,
     "opacity": 0.75,
     "font_size": 12,
     "position": "bottom_right"
