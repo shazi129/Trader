@@ -4,6 +4,9 @@
 from enum import Enum
 from stock_info import StockInfo, StockMarket
 
+#行情数据源: "eastmoney" | "akshare" | "yfinance" | "xueqiu"
+QUOTE_SOURCE: str = "eastmoney"
+
 #当前用到的股票信息配置
 global_stock_list: dict[str, StockInfo] = {
     "Tencent": StockInfo('腾讯', '00700',  StockMarket.HK, "2004-06-16"),
@@ -11,6 +14,8 @@ global_stock_list: dict[str, StockInfo] = {
     "Tencent_14210": StockInfo('腾讯花旗六乙沽', '14210',  StockMarket.HK, "2025-02-26", True),
     "Alibaba": StockInfo('阿里-港', '09988', StockMarket.HK, "2019-11-26"),
     "COMEX_AG": StockInfo('Comex白银', 'SI00Y', StockMarket.COMEX, "2011-07-22"),
+    "SilverETF": StockInfo('白银基金', '518880', StockMarket.SH, "2015-08-12"),
+    "SSE_Index": StockInfo('上证指数', '000001', StockMarket.SH, "1990-12-19"),
 }
 
 def create_show_data():

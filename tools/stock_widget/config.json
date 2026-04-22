@@ -1,24 +1,29 @@
 {
+    "api": "Tencent",
     "stocks": [
         {
             "stock_code": "hk00700",
             "name": "腾讯",
-            "show": true
+            "show": true,
+            "name_key": "Tencent"
         },
         {
             "stock_code": "hk09988",
             "name": "阿里巴巴",
-            "show": false
+            "show": false,
+            "name_key": "Alibaba"
         },
         {
             "stock_code": "sh518880",
             "name": "白银基金",
-            "show": false
+            "show": false,
+            "name_key": "SilverETF"
         },
         {
             "stock_code": "sh000001",
             "name": "上证指数",
-            "show": false
+            "show": false,
+            "name_key": "SSE_Index"
         }
     ],
     "refresh_interval": 60,
