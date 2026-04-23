@@ -10,11 +10,12 @@ from enum import Enum
 from typing import Optional
 
 from quote_api.quote_base import QuoteAPI
-from quote_api.eastmoney_quote import EastMoneyQuoteAPI
-from quote_api.akshare_quote import AkShareQuoteAPI
-from quote_api.yfinance_quote import YFinanceQuoteAPI
-from quote_api.xueqiu_quote import XueqiuQuoteAPI
-from quote_api.tencent_quote import TencentQuoteAPI
+from quote_api.eastmoney import EastMoneyQuoteAPI
+from quote_api.akshare import AkShareQuoteAPI
+from quote_api.yfinance import YFinanceQuoteAPI
+from quote_api.xueqiu import XueqiuQuoteAPI
+from quote_api.tencent import TencentQuoteAPI
+from quote_api.sina import SinaQuoteAPI
 
 
 class QuoteSource(str, Enum):
@@ -24,6 +25,7 @@ class QuoteSource(str, Enum):
     YFINANCE = "yfinance"
     XUEQIU = "xueqiu"
     TENCENT = "tencent"
+    SINA = "sina"
 
 
 class QuoteAPIFactory:
@@ -42,6 +44,7 @@ class QuoteAPIFactory:
         QuoteSource.YFINANCE.value: YFinanceQuoteAPI,
         QuoteSource.XUEQIU.value: XueqiuQuoteAPI,
         QuoteSource.TENCENT.value: TencentQuoteAPI,
+        QuoteSource.SINA.value: SinaQuoteAPI,
     }
 
     # ------------------------------------------------------------------

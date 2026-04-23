@@ -28,7 +28,8 @@ from PySide6.QtGui import QFont, QAction, QCursor
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
 # 支持的数据源。顺序决定菜单中的排列顺序。
-SUPPORTED_APIS = ("tencent", "eastmoney", "akshare", "yfinance", "xueqiu")
+# 注意：sina 仅稳定支持 A 股（实时+K 线）；港股只有实时快照、没有历史 K 线。
+SUPPORTED_APIS = ("tencent", "eastmoney", "akshare", "yfinance", "xueqiu", "sina")
 DEFAULT_API = "tencent"
 
 
@@ -332,15 +333,16 @@ class StockWidget(QWidget):
         self._thread.start()
 
     def _on_data(self, quote):
-        """收到 StockQuote 或 None，展示格式: 507.0|+3.5 或 507.0|-2.0"""
+        """收到 StockQuote 或 None，展示格式: 507.00|+3.50 或 507.00|-2.00"""
         if quote is not None and isinstance(quote, StockQuote):
+            price_str = f"{quote.price:.2f}"
             if quote.change > 0:
-                change_str = f"+{quote.change}"
+                change_str = f"+{quote.change:.2f}"
             elif quote.change < 0:
-                change_str = f"{quote.change}"
+                change_str = f"{quote.change:.2f}"
             else:
-                change_str = "0"
-            self.label.setText(f"{quote.price}|{change_str}")
+                change_str = "0.00"
+            self.label.setText(f"{price_str}|{change_str}")
         else:
             self.label.setText("--")
         # 自适应大小
@@ -349,6 +351,15 @@ class StockWidget(QWidget):
     def _on_thread_finished(self):
         """线程执行结束的兜底回调，无论成功失败都恢复 _fetching 标记。"""
         self._fetching = False
+
+    # ---- 关闭事件：正确回收线程，避免 QThread 警告 ----
+    def closeEvent(self, event):
+        try:
+            self.timer.stop()
+        except Exception:
+            pass
+        self._cleanup_thread()
+        super().closeEvent(event)
 
     # ---- 拖动 ----
     def mousePressEvent(self, event):
