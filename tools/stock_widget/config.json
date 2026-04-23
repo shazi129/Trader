@@ -1,16 +1,16 @@
 {
-    "api": "sina",
+    "api": "tencent",
     "stocks": [
         {
             "stock_code": "hk00700",
             "name": "腾讯",
-            "show": true,
+            "show": false,
             "name_key": "Tencent"
         },
         {
             "stock_code": "hk09988",
             "name": "阿里巴巴",
-            "show": false,
+            "show": true,
             "name_key": "Alibaba"
         },
         {
