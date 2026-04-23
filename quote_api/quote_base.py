@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import datetime
+import json
+from pathlib import Path
 from typing import Optional
 
 
@@ -61,7 +63,37 @@ class QuoteAPI:
     DEFAULT_TIMEOUT: int = 8
 
     def __init__(self) -> None:
-        pass
+        self._api_stocks: dict[str, str] = {}  # name_key -> stock_code
+        self._load_api_config()
+
+    # ------------------------------------------------------------------
+    def _load_api_config(self) -> None:
+        """从子类所在目录的 config.json 加载 name_key -> stock_code 映射。
+
+        config.json 格式: {"stocks": {"Tencent": "hk00700", ...}}
+        """
+        try:
+            # 取子类文件所在目录
+            import inspect
+            cls_file = inspect.getfile(type(self))
+            cfg_path = Path(cls_file).parent / "config.json"
+            if cfg_path.exists():
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                stocks = data.get("stocks")
+                if isinstance(stocks, dict):
+                    self._api_stocks = {str(k): str(v) for k, v in stocks.items()}
+        except Exception as e:
+            print(f"[{self.SOURCE}] load api config error: {e}")
+
+    # ------------------------------------------------------------------
+    def is_supported(self, name_key: str) -> bool:
+        """判断当前 API 是否支持指定的 name_key。"""
+        return name_key in self._api_stocks
+
+    def get_stock_code(self, name_key: str) -> Optional[str]:
+        """获取 name_key 对应的 API 专属 stock_code；不支持则返回 None。"""
+        return self._api_stocks.get(name_key)
 
     # ------------------------------------------------------------------
     # 子类必须实现：批量 K 线

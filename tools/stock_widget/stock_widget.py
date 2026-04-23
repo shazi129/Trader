@@ -35,18 +35,35 @@ DEFAULT_API = "tencent"
 
 @dataclass
 class StockConfig:
-    """单只股票的配置"""
-    stock_code: str          # 腾讯接口代码: hk00700, sh600519, sz000001, usAAPL
-    name: str                # 自定义显示名
+    """单只股票的配置
+
+    核心字段是 name_key —— 对应 config.global_stock_list 的键，
+    各 API 实现内部自行根据 name_key 查找股票代码。
+    """
+    name_key: str            # global_stock_list 的键（唯一标识）
+    name: str                # 自定义显示名（空串时运行时从 global_stock_list 取）
     show: bool               # 是否在 widget 上显示
-    name_key: str = ""       # 对应 config.global_stock_list 的键（供非腾讯源使用）
+
+
+def _resolve_display_name(s: StockConfig) -> str:
+    """如果 name 为空，尝试从 global_stock_list 获取中文名。"""
+    if s.name:
+        return s.name
+    try:
+        import config as app_config
+        info = app_config.global_stock_list.get(s.name_key)
+        if info is not None:
+            return info.name
+    except Exception:
+        pass
+    return s.name_key
 
 
 def load_config() -> dict:
     default = {
         "api": DEFAULT_API,
         "stocks": [
-            {"stock_code": "hk00700", "name": "腾讯", "show": True, "name_key": "Tencent"},
+            {"name_key": "Tencent", "name": "腾讯", "show": True},
         ],
         "refresh_interval": 5,
         "opacity": 0.75,
@@ -57,10 +74,6 @@ def load_config() -> dict:
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
-                # 兼容旧配置：单个 stock_code 转为 stocks 数组
-                if "stock_code" in cfg and "stocks" not in cfg:
-                    code = cfg.pop("stock_code")
-                    cfg["stocks"] = [{"stock_code": code, "name": code, "show": True}]
                 default.update(cfg)
         except Exception:
             pass
@@ -77,11 +90,12 @@ def load_config() -> dict:
         if isinstance(s, StockConfig):
             normalized.append(s)
             continue
+        # 兼容旧配置：如果只有 stock_code 没有 name_key，则 name_key 留空
+        name_key = s.get("name_key", "")
         normalized.append(StockConfig(
-            stock_code=s.get("stock_code", ""),
+            name_key=name_key,
             name=s.get("name", ""),
             show=bool(s.get("show", False)),
-            name_key=s.get("name_key", ""),
         ))
     default["stocks"] = normalized
     return default
@@ -94,10 +108,9 @@ def save_config(config: dict) -> None:
             "api": config.get("api", DEFAULT_API),
             "stocks": [
                 {
-                    "stock_code": s.stock_code,
+                    "name_key": s.name_key,
                     "name": s.name,
                     "show": s.show,
-                    "name_key": s.name_key,
                 }
                 for s in config["stocks"]
             ],
@@ -148,7 +161,7 @@ class FetchThread(QThread):
       （如 tencent 会走 qt.gtimg.cn 实时接口；其它源取最近一根日K）。
     - 若拿不到 pre_close，则再取最近两根日K，用上一根 close 作为昨收计算涨跌。
     """
-    result_ready = Signal(object)  # StockQuote | None
+    result_ready = Signal(object)  # StockQuote | str("UNSUPPORTED") | None
 
     def __init__(self, api: str, stock: StockConfig, parent=None):
         super().__init__(parent)
@@ -157,7 +170,7 @@ class FetchThread(QThread):
 
     # ------------------------------------------------------------------
     def run(self):
-        quote: Optional[StockQuote] = None
+        quote = None
         try:
             quote = self._fetch_via_quote_api(self.api, self.stock)
         except Exception as e:
@@ -166,7 +179,7 @@ class FetchThread(QThread):
         self.result_ready.emit(quote)
 
     # ------------------------------------------------------------------
-    def _fetch_via_quote_api(self, api: str, stock: StockConfig) -> Optional[StockQuote]:
+    def _fetch_via_quote_api(self, api: str, stock: StockConfig):
         if not stock.name_key:
             print(f"[FetchThread] stock '{stock.name}' missing 'name_key', cannot query api={api}")
             return None
@@ -182,6 +195,11 @@ class FetchThread(QThread):
         except Exception as e:
             print(f"[FetchThread] create api '{api}' failed: {e}")
             return None
+
+        # 检查当前 API 是否支持该 name_key
+        if not impl.is_supported(stock.name_key):
+            print(f"[FetchThread] api '{api}' does not support '{stock.name_key}'")
+            return "UNSUPPORTED"
 
         # 1) 取当前最新一条
         try:
@@ -210,14 +228,24 @@ class FetchThread(QThread):
         change = last.close - prev_close
         change_pct = (change / prev_close * 100) if prev_close > 0 else 0.0
 
-        # 币种按市场前缀推测（stock_code 保留前缀用于展示/币种推断）
-        market_prefix = stock.stock_code[:2].lower()
-        currency_map = {"hk": "HKD", "us": "USD"}
-        currency = currency_map.get(market_prefix, "CNY")
+        # 币种按 global_stock_list 中的 market 推断
+        currency = "CNY"
+        try:
+            import config as app_config
+            from stock_info import StockMarket
+            info = app_config.global_stock_list.get(stock.name_key)
+            if info is not None:
+                _market_currency = {
+                    StockMarket.HK: "HKD",
+                    StockMarket.COMEX: "USD",
+                }
+                currency = _market_currency.get(info.market, "CNY")
+        except Exception:
+            pass
 
         return StockQuote(
-            name=stock.name,
-            code=last.code or stock.stock_code,
+            name=stock.name or stock.name_key,
+            code=last.code,
             price=last.close,
             prev_close=prev_close,
             change=round(change, 4),
@@ -333,8 +361,11 @@ class StockWidget(QWidget):
         self._thread.start()
 
     def _on_data(self, quote):
-        """收到 StockQuote 或 None，展示格式: 507.00|+3.50 或 507.00|-2.00"""
-        if quote is not None and isinstance(quote, StockQuote):
+        """收到 StockQuote / "UNSUPPORTED" / None，展示对应内容"""
+        if quote == "UNSUPPORTED":
+            self.label.setText("不支持")
+            self._apply_style("#888888")
+        elif quote is not None and isinstance(quote, StockQuote):
             price_str = f"{quote.price:.2f}"
             if quote.change > 0:
                 change_str = f"+{quote.change:.2f}"
@@ -385,7 +416,7 @@ class StockWidget(QWidget):
         stock_menu = menu.addMenu("切换股票")
         for stock in self.config["stocks"]:
             action = QAction(
-                f"{'✔ ' if stock.show else '   '}{stock.name} ({stock.stock_code})",
+                f"{'✔ ' if stock.show else '   '}{_resolve_display_name(stock)} ({stock.name_key})",
                 self,
             )
             action.triggered.connect(lambda checked=False, s=stock: self._switch_stock(s))

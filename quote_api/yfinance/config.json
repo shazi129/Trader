@@ -1,0 +1,11 @@
+{
+    "stocks": {
+        "Tencent": "00700.HK",
+        "Tencent_14136": "14136.HK",
+        "Tencent_14210": "14210.HK",
+        "Alibaba": "09988.HK",
+        "COMEX_AG": "SI=F",
+        "SilverETF": "518880.SS",
+        "SSE_Index": "000001.SS"
+    }
+}

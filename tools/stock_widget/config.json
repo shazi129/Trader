@@ -1,29 +1,25 @@
 {
-    "api": "tencent",
+    "api": "eastmoney",
     "stocks": [
         {
-            "stock_code": "hk00700",
+            "name_key": "Tencent",
             "name": "腾讯",
-            "show": false,
-            "name_key": "Tencent"
+            "show": false
         },
         {
-            "stock_code": "hk09988",
+            "name_key": "Alibaba",
             "name": "阿里巴巴",
-            "show": true,
-            "name_key": "Alibaba"
+            "show": false
         },
         {
-            "stock_code": "sh518880",
-            "name": "白银基金",
-            "show": false,
-            "name_key": "SilverETF"
+            "name_key": "COMEX_AG",
+            "name": "Comex白银",
+            "show": true
         },
         {
-            "stock_code": "sh000001",
+            "name_key": "SSE_Index",
             "name": "上证指数",
-            "show": false,
-            "name_key": "SSE_Index"
+            "show": false
         }
     ],
     "refresh_interval": 60,
