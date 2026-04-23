@@ -24,6 +24,9 @@ class DailyQuote:
         self.volume: float = 0.0     # 成交量（股/手，按源决定，实现内统一为"股"）
         self.turnover: float = 0.0   # 成交额（元）
         self.source: str = ""        # 数据来源标识
+        self.change: float = 0.0     # 涨跌额（派生字段，可由上层计算后填入）
+        self.change_pct: float = 0.0 # 涨跌幅 %（派生字段）
+        self.currency: str = ""      # 币种（派生字段，如 CNY/HKD/USD）
 
     def is_valid(self) -> bool:
         """简单校验：至少要有日期和收盘价"""

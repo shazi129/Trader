@@ -133,23 +133,6 @@ def get_active_stock(config: dict) -> Optional[StockConfig]:
     return None
 
 # ---------------------------------------------------------------------------
-# 数据模型
-# ---------------------------------------------------------------------------
-
-@dataclass
-class StockQuote:
-    """统一行情快照"""
-    name: str           # 中文名
-    code: str           # 证券代码
-    price: float        # 最新价
-    prev_close: float   # 昨收
-    change: float       # 涨跌额
-    change_pct: float   # 涨跌幅 (%)
-    high: float         # 最高
-    low: float          # 最低
-    currency: str       # 币种
-
-# ---------------------------------------------------------------------------
 # 数据获取线程
 # ---------------------------------------------------------------------------
 
@@ -161,7 +144,7 @@ class FetchThread(QThread):
       （如 tencent 会走 qt.gtimg.cn 实时接口；其它源取最近一根日K）。
     - 若拿不到 pre_close，则再取最近两根日K，用上一根 close 作为昨收计算涨跌。
     """
-    result_ready = Signal(object)  # StockQuote | str("UNSUPPORTED") | None
+    result_ready = Signal(object)  # DailyQuote | str("UNSUPPORTED") | None
 
     def __init__(self, api: str, stock: StockConfig, parent=None):
         super().__init__(parent)
@@ -225,11 +208,13 @@ class FetchThread(QThread):
         if prev_close <= 0:
             prev_close = last.close  # 彻底无法确定时退化为 0 涨跌
 
-        change = last.close - prev_close
-        change_pct = (change / prev_close * 100) if prev_close > 0 else 0.0
+        # 3) 填充派生字段
+        last.pre_close = prev_close
+        last.change = round(last.close - prev_close, 4)
+        last.change_pct = round((last.change / prev_close * 100) if prev_close > 0 else 0.0, 2)
+        last.name = stock.name or stock.name_key
 
         # 币种按 global_stock_list 中的 market 推断
-        currency = "CNY"
         try:
             import config as app_config
             from stock_info import StockMarket
@@ -239,21 +224,11 @@ class FetchThread(QThread):
                     StockMarket.HK: "HKD",
                     StockMarket.COMEX: "USD",
                 }
-                currency = _market_currency.get(info.market, "CNY")
+                last.currency = _market_currency.get(info.market, "CNY")
         except Exception:
             pass
 
-        return StockQuote(
-            name=stock.name or stock.name_key,
-            code=last.code,
-            price=last.close,
-            prev_close=prev_close,
-            change=round(change, 4),
-            change_pct=round(change_pct, 2),
-            high=last.high,
-            low=last.low,
-            currency=currency,
-        )
+        return last
 
 # ---------------------------------------------------------------------------
 # 主控件
@@ -361,12 +336,13 @@ class StockWidget(QWidget):
         self._thread.start()
 
     def _on_data(self, quote):
-        """收到 StockQuote / "UNSUPPORTED" / None，展示对应内容"""
+        """收到 DailyQuote / "UNSUPPORTED" / None，展示对应内容"""
+        from quote_api.quote_base import DailyQuote
         if quote == "UNSUPPORTED":
             self.label.setText("不支持")
             self._apply_style("#888888")
-        elif quote is not None and isinstance(quote, StockQuote):
-            price_str = f"{quote.price:.2f}"
+        elif quote is not None and isinstance(quote, DailyQuote):
+            price_str = f"{quote.close:.2f}"
             if quote.change > 0:
                 change_str = f"+{quote.change:.2f}"
             elif quote.change < 0:
