@@ -502,7 +502,8 @@ class FactorSeriesEngine:
 
 def compute_and_save_factors(stock_name: str, api_name: str = "tencent", 
                              db_path: Optional[str] = None, 
-                             limit: int = 5000) -> bool:
+                             limit: int = 5000,
+                             force_refresh: bool = False) -> bool:
     """
     计算并保存指定股票的所有因子到数据库
     
@@ -510,6 +511,7 @@ def compute_and_save_factors(stock_name: str, api_name: str = "tencent",
     :param api_name: API数据源 (如 "tencent")
     :param db_path: 数据库路径 (默认: database/stock_data.db)
     :param limit: 获取K线数据的数量
+    :param force_refresh: 是否强制从API刷新数据（忽略缓存）
     :return: 是否成功
     """
     
@@ -518,14 +520,45 @@ def compute_and_save_factors(stock_name: str, api_name: str = "tencent",
     # 1. 获取K线数据
     print(f"[FactorBatch] 正在从 {api_name} 获取K线数据...")
     raw_api = QuoteAPIFactory.create(api_name)
-    cached_api = CachedQuoteAPI(raw_api)
     
-    quotes = cached_api.get_klines(stock_name, limit=limit)
+    if force_refresh:
+        # 强制从API获取，不使用缓存
+        print(f"[FactorBatch] 强制刷新模式：直接从API获取")
+        quotes = raw_api.get_klines(stock_name, limit=limit)
+    else:
+        # 使用缓存
+        cached_api = CachedQuoteAPI(raw_api)
+        quotes = cached_api.get_klines(stock_name, limit=limit)
     if not quotes:
         print(f"[FactorBatch] 无法获取 {stock_name} 的K线数据")
         return False
     
     print(f"[FactorBatch] 获取到 {len(quotes)} 条K线数据")
+    
+    # 1.5 保存原始K线数据到数据库
+    print(f"[FactorBatch] 正在保存原始K线数据到数据库...")
+    from stock_info import KlineData
+    db_temp = StockDB(db_path)
+    db_temp.create_all_tables(stock_name)
+    saved_count = 0
+    for quote in quotes:
+        kline = KlineData()
+        kline.date = quote.date
+        kline.open = quote.open
+        kline.close = quote.close
+        kline.high = quote.high
+        kline.low = quote.low
+        kline.volume = quote.volume
+        kline.turnover = getattr(quote, 'turnover', 0.0)
+        kline.turnover_rate = 0.0
+        kline.pe = 0.0
+        try:
+            db_temp.write_kline_data(stock_name, kline)
+            saved_count += 1
+        except Exception as e:
+            pass  # 跳过已存在的数据
+    db_temp.close()
+    print(f"[FactorBatch] 保存原始K线数据: {saved_count} 条")
     
     # 2. 计算所有因子
     print(f"[FactorBatch] 正在计算所有因子...")
@@ -622,11 +655,12 @@ def main():
     parser.add_argument("--api", default="tencent", help="API数据源 (default: tencent)")
     parser.add_argument("--limit", type=int, default=5000, help="K线数据数量 (default: 5000)")
     parser.add_argument("--db", help="数据库路径 (默认: database/stock_data.db)")
+    parser.add_argument("--force-refresh", action="store_true", help="强制从API刷新数据（忽略缓存）")
     args = parser.parse_args()
     
     if args.stock:
         # 处理单个股票
-        success = compute_and_save_factors(args.stock, args.api, args.db, args.limit)
+        success = compute_and_save_factors(args.stock, args.api, args.db, args.limit, args.force_refresh)
         sys.exit(0 if success else 1)
     else:
         # 处理所有股票
