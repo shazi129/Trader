@@ -63,6 +63,16 @@ class XueqiuQuoteAPI(QuoteAPI):
             return "SZ%s" % code
         if market == StockMarket.HK:
             return code.zfill(5)
+        # 美股市场：雪球格式为 "NYSE:CODE" 或 "NASDAQ:CODE"
+        if market in (StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US):
+            # 尝试判断是哪个交易所
+            if market == StockMarket.NASDAQ:
+                return "NASDAQ:%s" % code
+            elif market == StockMarket.NYSE:
+                return "NYSE:%s" % code
+            else:
+                # US通用：先尝试NASDAQ
+                return "NASDAQ:%s" % code
         return None  # 无商品期货
 
     # ------------------------------------------------------------------
@@ -154,11 +164,15 @@ class XueqiuQuoteAPI(QuoteAPI):
             "count": count,     # 负数=向前取
             "indicator": "kline",
         }
+        print("[XueqiuQuoteAPI] Requesting: %s (begin=%s, count=%s)" % (symbol, begin_ms, count))
         try:
             resp = self._session.get(
                 self._KLINE_URL, params=params, timeout=self.DEFAULT_TIMEOUT
             )
+            print("[XueqiuQuoteAPI] Response status: %s" % resp.status_code)
+            print("[XueqiuQuoteAPI] Response text: %s" % resp.text[:500])
             payload = json.loads(resp.text)
+            print("[XueqiuQuoteAPI] Response keys: %s" % (list(payload.keys()) if isinstance(payload, dict) else "not dict"))
         except Exception as e:
             print("[XueqiuQuoteAPI] request error: %s" % e)
             return [], []

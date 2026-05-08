@@ -8,6 +8,9 @@ class StockMarket(Enum):
     SZ          = 2     #深证
     HK          = 3     #港证
     COMEX       = 4     #纽约商品交易所
+    NASDAQ      = 5     #纳斯达克
+    NYSE        = 6     #纽约证券交易所
+    US          = 7     #美股通用
 
 #股票信息抽象
 class StockInfo:

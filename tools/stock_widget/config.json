@@ -1,10 +1,10 @@
 {
-    "api": "eastmoney",
+    "api": "sina",
     "stocks": [
         {
             "name_key": "Tencent",
             "name": "腾讯",
-            "show": false
+            "show": true
         },
         {
             "name_key": "Alibaba",
@@ -14,7 +14,7 @@
         {
             "name_key": "COMEX_AG",
             "name": "Comex白银",
-            "show": true
+            "show": false
         },
         {
             "name_key": "SSE_Index",

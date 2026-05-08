@@ -13,6 +13,7 @@ global_stock_list: dict[str, StockInfo] = {
     "Tencent_14136": StockInfo('腾讯法兴六乙沽', '14136',  StockMarket.HK, "2025-02-25", True),
     "Tencent_14210": StockInfo('腾讯花旗六乙沽', '14210',  StockMarket.HK, "2025-02-26", True),
     "Alibaba": StockInfo('阿里-港', '09988', StockMarket.HK, "2019-11-26"),
+    "NVIDIA": StockInfo('英伟达', 'NVDA', StockMarket.NASDAQ, "1999-01-22"),
     "COMEX_AG": StockInfo('Comex白银', 'SI00Y', StockMarket.COMEX, "2011-07-22"),
     "SilverETF": StockInfo('白银基金', '518880', StockMarket.SH, "2015-08-12"),
     "SSE_Index": StockInfo('上证指数', '000001', StockMarket.SH, "1990-12-19"),

@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import Optional
 
+import config
+
 
 class DailyQuote:
     """单日行情快照（与数据源无关的统一模型）"""
@@ -42,6 +44,65 @@ class DailyQuote:
                 self.open, self.close, self.high, self.low,
                 self.pre_close, self.volume, self.turnover,
             )
+        )
+
+
+class StockFundamental:
+    """股票基本面数据（低频更新：季度/年度）"""
+
+    def __init__(self) -> None:
+        # 标识
+        self.name: str = ""          # 股票名称/键
+        self.code: str = ""          # 交易所代码
+        self.date: str = ""          # 报告期 YYYY-MM-DD
+        
+        # 估值类
+        self.pe_ttm: float = 0.0    # 市盈率 TTM
+        self.pb: float = 0.0        # 市净率
+        self.ps_ttm: float = 0.0     # 市销率 TTM
+        self.pcf_ttm: float = 0.0   # 市现率 TTM
+        self.ev_ebitda: float = 0.0 # EV/EBITDA
+        
+        # 盈利类
+        self.eps_ttm: float = 0.0    # 每股收益 TTM
+        self.eps: float = 0.0        # 最新季度 EPS
+        self.roe_ttm: float = 0.0    # 净资产收益率 TTM %
+        self.roa: float = 0.0        # 资产回报率 %
+        self.roc: float = 0.0        # 资本回报率 %
+        
+        # 成长类
+        self.eps_growth_ttm: float = 0.0  # EPS同比增长率 %
+        self.revenue_growth_ttm: float = 0.0  # 营收同比增长率 %
+        self.profit_growth_ttm: float = 0.0   # 净利润同比增长率 %
+        
+        # 股息类
+        self.dividend_yield: float = 0.0  # 股息率 %
+        self.dividend_per_share: float = 0.0  # 每股股息
+        
+        # 规模类
+        self.market_cap: float = 0.0   # 总市值（元/当地货币）
+        self.circulating_market_cap: float = 0.0  # 流通市值
+        
+        # 财务健康类
+        self.debt_to_equity: float = 0.0  # 资产负债率 %
+        self.current_ratio: float = 0.0    # 流动比率
+        
+        # 评级类（可选）
+        self.analyst_rating: float = 0.0   # 分析师评级均值（1-5）
+        self.target_price: float = 0.0     # 目标价
+        
+        self.source: str = ""      # 数据来源
+
+    def is_valid(self) -> bool:
+        """简单校验"""
+        return bool(self.name) and (self.pe_ttm > 0 or self.pb > 0 or self.market_cap > 0)
+
+    def __str__(self) -> str:
+        return (
+            "StockFundamental(name=%s, code=%s, date=%s, "
+            "PE=%.2f, PB=%.2f, EPS=%.4f, ROE=%.2f%%, MarketCap=%.0f)"
+            % (self.name, self.code, self.date,
+               self.pe_ttm, self.pb, self.eps_ttm, self.roe_ttm, self.market_cap)
         )
 
 
@@ -92,7 +153,22 @@ class QuoteAPI:
     # ------------------------------------------------------------------
     def is_supported(self, name_key: str) -> bool:
         """判断当前 API 是否支持指定的 name_key。"""
-        return name_key in self._api_stocks
+        # 首先检查API自己的配置
+        if name_key in self._api_stocks:
+            return True
+        
+        # 然后检查全局配置，看该股票的market是否被当前API支持
+        stock = config.global_stock_list.get(name_key)
+        if stock is None:
+            return False
+        
+        # 检查当前API是否支持该市场
+        return self._supports_market(stock.market)
+    
+    def _supports_market(self, market: StockMarket) -> bool:
+        """检查当前API是否支持指定市场。子类可override。"""
+        # 默认：支持所有市场（子类应重写此方法）
+        return True
 
     def get_stock_code(self, name_key: str) -> Optional[str]:
         """获取 name_key 对应的 API 专属 stock_code；不支持则返回 None。"""
@@ -150,6 +226,19 @@ class QuoteAPI:
             if q.date == target:
                 return q
         return items[-1]
+
+    # ------------------------------------------------------------------
+    # 基本面数据（子类可选实现）
+    # ------------------------------------------------------------------
+    def get_fundamentals(self, name: str) -> Optional[StockFundamental]:
+        """
+        获取股票基本面数据。
+        
+        :param name: config.global_stock_list 中的键
+        :return: StockFundamental；获取失败返回 None
+        """
+        # 默认实现：返回 None，子类可 override
+        return None
 
     # ------------------------------------------------------------------
     # 工具方法（子类可复用）

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import datetime
+import time
 from typing import Optional
 
 import config
@@ -42,6 +43,10 @@ class YFinanceQuoteAPI(QuoteAPI):
         except ImportError:
             self._yf = None
             print("[YFinanceQuoteAPI] yfinance not installed, run: pip install yfinance")
+        
+        # 重试参数
+        self._retry_count = 3
+        self._retry_delay = 5  # 秒
 
     # ------------------------------------------------------------------
     def _yahoo_symbol(self, market: StockMarket, code: str) -> Optional[str]:
@@ -53,6 +58,9 @@ class YFinanceQuoteAPI(QuoteAPI):
             return "%s.SZ" % code
         if market == StockMarket.COMEX:
             return _COMEX_MAP.get(code, code)
+        # 美股市场（NASDAQ/NYSE/US）直接使用代码
+        if market in (StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US):
+            return code
         return None
 
     # ------------------------------------------------------------------
@@ -101,11 +109,33 @@ class YFinanceQuoteAPI(QuoteAPI):
             else:
                 kwargs["period"] = "max"
 
-        try:
-            ticker = self._yf.Ticker(symbol)
-            df = ticker.history(**kwargs)
-        except Exception as e:
-            print("[YFinanceQuoteAPI] request error: %s" % e)
+        # 添加重试逻辑
+        df = None
+        for attempt in range(self._retry_count):
+            try:
+                if attempt > 0:
+                    wait_time = self._retry_delay * (attempt + 1)
+                    print("[YFinanceQuoteAPI] Retry %s/%s, waiting %s seconds..." % (attempt + 1, self._retry_count, wait_time))
+                    time.sleep(wait_time)
+                else:
+                    time.sleep(self._retry_delay)
+                
+                ticker = self._yf.Ticker(symbol)
+                df = ticker.history(**kwargs)
+                break  # 成功，跳出循环
+            except Exception as e:
+                error_msg = str(e)
+                if "Rate limit" in error_msg and attempt < self._retry_count - 1:
+                    wait_time = self._retry_delay * (attempt + 2)
+                    print("[YFinanceQuoteAPI] Rate limited, waiting %s seconds (attempt %s/%s)..." % (wait_time, attempt + 1, self._retry_count))
+                    time.sleep(wait_time)
+                elif attempt < self._retry_count - 1:
+                    print("[YFinanceQuoteAPI] Attempt %s failed: %s" % (attempt + 1, e))
+                else:
+                    print("[YFinanceQuoteAPI] All attempts failed: %s" % e)
+                    return []
+        
+        if df is None or len(df) == 0:
             return []
 
         if df is None or len(df) == 0:

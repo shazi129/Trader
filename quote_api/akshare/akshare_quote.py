@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""AkShare：K 线 / 单日行情实现
+"""AkShare：K 线 / 单日行情 / 基本面数据实现
 
 统一走 AkShare 的日线历史接口，再按 [start_date, end_date] 过滤：
 - A 股(SH/SZ): ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
 - 港股(HK):    ak.stock_hk_hist(symbol=code, period="daily", adjust="qfq")
 - COMEX:       ak.futures_foreign_hist(symbol=...)
+
+基本面数据：
+- 使用 ak.stock_individual_info_em() 获取市盈率、市净率、市值等
+- 使用 ak.stock_financial_abstract_ths() 获取财务摘要
 
 依赖：pip install akshare
 """
@@ -15,7 +19,7 @@ from typing import Optional
 
 import config
 from stock_info import StockMarket
-from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike
+from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, StockFundamental
 
 
 class AkShareQuoteAPI(QuoteAPI):
@@ -135,3 +139,12 @@ class AkShareQuoteAPI(QuoteAPI):
         q.volume = fget(["成交量", "volume", "Volume"])
         q.turnover = fget(["成交额", "amount", "turnover"])
         return q
+
+    # ------------------------------------------------------------------
+    def get_fundamentals(self, name: str) -> Optional[StockFundamental]:
+        """获取股票基本面数据（AkShare实现）
+        
+        注意：AkShare目前连接不稳定，建议使用东方财富API
+        """
+        # 禁用AkShare基本面数据获取（连接问题）
+        return None

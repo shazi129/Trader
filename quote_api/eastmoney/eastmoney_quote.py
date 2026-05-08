@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
-"""东方财富：K 线 / 单日行情实现
+"""东方财富：K 线 / 单日行情 / 基本面数据实现
 
 接口：
 - 实时快照：https://push2.eastmoney.com/api/qt/stock/get
     返回 JSON，字段值均为整数（价格 * 1000，涨跌幅 * 100 等），需除以对应因子还原。
     f43=最新价, f44=最高, f45=最低, f46=今开, f47=成交量(手), f48=成交额(元),
     f60=昨收, f170=涨跌幅(*100), f171=涨跌额(*1000)
+
+- 基本面数据：同一接口，通过 fields 参数获取 PE、PB、市值等
+    f9=PE动态, f23=PB, f116=总市值, f117=流通市值
 
 - 历史 K 线：https://push2his.eastmoney.com/api/qt/stock/kline/get
     ⚠ 该域名近期频繁被反爬拦截（服务端直接断连），仅作为降级通道保留。
@@ -21,7 +24,7 @@ import requests
 
 import config
 from stock_info import StockMarket
-from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike
+from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, StockFundamental
 
 
 class EastMoneyQuoteAPI(QuoteAPI):
@@ -224,3 +227,91 @@ class EastMoneyQuoteAPI(QuoteAPI):
         q.volume = _v("f47", 1.0)    # 成交量（手），不需要除因子
         q.turnover = _v("f48", 1.0)  # 成交额（元），不需要除因子
         return q
+
+    # ------------------------------------------------------------------
+    def get_fundamentals(self, name: str) -> Optional[StockFundamental]:
+        """获取股票基本面数据（东方财富实现）
+        
+        使用 push2.eastmoney.com/api/qt/stock/get 接口获取估值数据
+        字段：f9=PE动态 f23=PB f116=总市值 f117=流通市值
+        """
+        secid = self._get_secid(name)
+        if secid is None:
+            return None
+        
+        try:
+            fund = StockFundamental()
+            fund.name = name
+            fund.code = secid
+            fund.source = self.SOURCE
+            
+            # 1. 获取基本估值数据
+            params = {
+                "secid": secid,
+                "fields": "f9,f23,f116,f117",
+                "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            }
+            
+            resp = self._session.get(self._RT_URL, params=params, timeout=self.DEFAULT_TIMEOUT)
+            payload = json.loads(resp.text)
+            data = payload.get("data") if isinstance(payload, dict) else None
+            
+            if data:
+                # PE动态（市盈率）f162=PE×100
+                pe_raw = data.get("f162")
+                if pe_raw is not None and pe_raw != "-":
+                    try:
+                        fund.pe_ttm = float(pe_raw) / 100.0  # API返回PE×100
+                    except (ValueError, TypeError):
+                        pass
+                
+                # PB（市净率）f163=PB×100
+                pb_raw = data.get("f163")
+                if pb_raw is not None and pb_raw != "-":
+                    try:
+                        fund.pb = float(pb_raw) / 100.0  # API返回PB×100
+                    except (ValueError, TypeError):
+                        pass
+                
+                # 总市值（元）f116
+                mcap_raw = data.get("f116")
+                if mcap_raw is not None and mcap_raw != "-":
+                    try:
+                        fund.market_cap = float(mcap_raw)
+                    except (ValueError, TypeError):
+                        pass
+                
+                # 流通市值（元）f117
+                circ_mcap_raw = data.get("f117")
+                if circ_mcap_raw is not None and circ_mcap_raw != "-":
+                    try:
+                        fund.circulating_market_cap = float(circ_mcap_raw)
+                    except (ValueError, TypeError):
+                        pass
+            
+            # 2. 尝试获取财务数据（ROE、营收等）
+            # 使用东方财富的财务摘要接口
+            try:
+                # 通过股票代码获取财务数据
+                stock = config.global_stock_list.get(name)
+                if stock:
+                    # 构造请求获取财务摘要
+                    fin_params = {
+                        "type": "0",  # 0=按年度
+                        "code": stock.code,
+                    }
+                    # 注意：这个接口可能需要不同的URL，这里先留作扩展
+                    # 可以后续添加 ak.stock_financial_abstract_ths 的直连版本
+            except Exception:
+                pass
+            
+            fund.date = datetime.datetime.now().strftime("%Y-%m-%d")
+            
+            # 只要有一部分数据就返回，不要求全部有效
+            if fund.pe_ttm > 0 or fund.pb > 0 or fund.market_cap > 0:
+                return fund
+            return None
+            
+        except Exception as e:
+            print("[EastMoneyQuoteAPI] get_fundamentals error: %s" % e)
+            return None
