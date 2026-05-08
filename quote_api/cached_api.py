@@ -170,10 +170,13 @@ class CachedQuoteAPI(QuoteAPI):
         db.create_all_tables(name)
 
         if target:
-            # 查询指定日期
-            sql = f"SELECT * FROM {name} WHERE Date='{target}' ORDER BY Date DESC LIMIT 1"
+            # 查询指定日期（长表：按 Symbol+Date 过滤）
+            sql = (
+                "SELECT Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate, PE "
+                f"FROM {db.TABLE_KLINE} WHERE Symbol=? AND Date=? LIMIT 1"
+            )
             try:
-                db._cursor.execute(sql)
+                db._cursor.execute(sql, (name, target))
                 row = db._cursor.fetchone()
                 if row:
                     import sys
@@ -181,7 +184,7 @@ class CachedQuoteAPI(QuoteAPI):
                     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
                     from stock_info import KlineData
                     kline = KlineData()
-                    if kline.parse(row):
+                    if kline.parse(tuple(row)):
                         print(f"[CachedAPI] 从数据库返回单日数据: {target}")
                         return self._convert_to_daily_quote(kline)
             except Exception as e:
