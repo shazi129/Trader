@@ -1782,9 +1782,25 @@ def compute_probability(factors: list[FactorResult]) -> tuple[float, float, str]
 class QuantAnalyzer:
     """量化分析器"""
 
-    def __init__(self, api: str = "tencent"):
+    def __init__(self, api: str = "tencent", use_cache: bool = True):
+        """
+        初始化分析器
+        
+        :param api: 数据源名称 (tencent/eastmoney/sina)
+        :param use_cache: 是否使用数据库缓存 (default: True)
+        """
         self.api = api
-        self.impl = QuoteAPIFactory.create(api)
+        self.use_cache = use_cache
+        
+        if use_cache:
+            # 使用带缓存的API
+            raw_api = QuoteAPIFactory.create(api)
+            self.impl = CachedQuoteAPI(raw_api)
+            print(f"[QuantAnalyzer] 使用带缓存的API: {self.impl.SOURCE}")
+        else:
+            # 使用原始API
+            self.impl = QuoteAPIFactory.create(api)
+            print(f"[QuantAnalyzer] 使用原始API: {self.impl.SOURCE}")
 
     def analyze(self, name_key: str, days: int = 500) -> Optional[AnalysisReport]:
         """
@@ -1905,9 +1921,11 @@ def main():
     parser.add_argument("stock", help="股票 name_key（如 Tencent, SSE_Index）")
     parser.add_argument("--api", default="tencent", help="数据源 (default: tencent)")
     parser.add_argument("--days", type=int, default=500, help="历史数据天数 (default: 500)")
+    parser.add_argument("--no-cache", action="store_true", help="不使用数据库缓存 (default: 使用缓存)")
     args = parser.parse_args()
 
-    analyzer = QuantAnalyzer(api=args.api)
+    use_cache = not args.no_cache
+    analyzer = QuantAnalyzer(api=args.api, use_cache=use_cache)
     report = analyzer.analyze(args.stock, days=args.days)
     if report:
         print("\n" + report.summary)

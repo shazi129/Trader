@@ -4,7 +4,7 @@
 from enum import Enum
 from stock_info import StockInfo, StockMarket
 
-#行情数据源: "eastmoney" | "akshare" | "yfinance" | "xueqiu"
+#行情数据源: "eastmoney" | "tencent" | "sina"
 QUOTE_SOURCE: str = "eastmoney"
 
 #当前用到的股票信息配置

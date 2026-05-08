@@ -3,7 +3,7 @@ Windows 11 浮空股票报价小控件 (PySide6)
 - 极简到极致：仅显示价格
 - 半透明、无边框、置顶、可拖动
 - 右键菜单退出/刷新/打开配置/切换股票/切换数据源
-- 支持多种行情数据源（腾讯财经 / 东方财富 / AkShare / yfinance / 雪球）
+- 支持多种行情数据源（腾讯财经 / 东方财富 / 新浪财经）
 """
 
 import sys
@@ -29,7 +29,7 @@ CONFIG_PATH = Path(__file__).parent / "config.json"
 
 # 支持的数据源。顺序决定菜单中的排列顺序。
 # 注意：sina 仅稳定支持 A 股（实时+K 线）；港股只有实时快照、没有历史 K 线。
-SUPPORTED_APIS = ("tencent", "eastmoney", "akshare", "yfinance", "xueqiu", "sina")
+SUPPORTED_APIS = ("tencent", "eastmoney", "sina")
 DEFAULT_API = "tencent"
 
 

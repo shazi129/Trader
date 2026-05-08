@@ -11,19 +11,14 @@ from typing import Optional
 
 from quote_api.quote_base import QuoteAPI
 from quote_api.eastmoney import EastMoneyQuoteAPI
-from quote_api.akshare import AkShareQuoteAPI
-from quote_api.yfinance import YFinanceQuoteAPI
-from quote_api.xueqiu import XueqiuQuoteAPI
 from quote_api.tencent import TencentQuoteAPI
 from quote_api.sina import SinaQuoteAPI
+from quote_api.cached_api import CachedQuoteAPI
 
 
 class QuoteSource(str, Enum):
     """支持的数据源枚举"""
     EASTMONEY = "eastmoney"
-    AKSHARE = "akshare"
-    YFINANCE = "yfinance"
-    XUEQIU = "xueqiu"
     TENCENT = "tencent"
     SINA = "sina"
 
@@ -33,16 +28,13 @@ class QuoteAPIFactory:
     行情 API 工厂。
 
     用法：
-        api = QuoteAPIFactory.create("akshare")
-        api = QuoteAPIFactory.create(QuoteSource.YFINANCE)
+        api = QuoteAPIFactory.create("eastmoney")
+        api = QuoteAPIFactory.create(QuoteSource.SINA)
         api = QuoteAPIFactory.create()   # 使用 config.QUOTE_SOURCE 默认值
     """
 
     _REGISTRY: dict[str, type[QuoteAPI]] = {
         QuoteSource.EASTMONEY.value: EastMoneyQuoteAPI,
-        QuoteSource.AKSHARE.value: AkShareQuoteAPI,
-        QuoteSource.YFINANCE.value: YFinanceQuoteAPI,
-        QuoteSource.XUEQIU.value: XueqiuQuoteAPI,
         QuoteSource.TENCENT.value: TencentQuoteAPI,
         QuoteSource.SINA.value: SinaQuoteAPI,
     }
@@ -83,3 +75,16 @@ class QuoteAPIFactory:
             return str(getattr(config, "QUOTE_SOURCE", QuoteSource.EASTMONEY.value)).lower()
         except Exception:
             return QuoteSource.EASTMONEY.value
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def create_with_cache(cls, source: Optional[str | QuoteSource] = None) -> CachedQuoteAPI:
+        """
+        创建带数据库缓存的 API 实例。
+
+        用法：
+            api = QuoteAPIFactory.create_with_cache("eastmoney")
+            klines = api.get_klines("Tencent", limit=500)  # 自动缓存
+        """
+        raw_api = cls.create(source)
+        return CachedQuoteAPI(raw_api)

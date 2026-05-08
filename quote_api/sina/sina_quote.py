@@ -155,10 +155,10 @@ class SinaQuoteAPI(QuoteAPI):
 
             if market == StockMarket.HK:
                 # 新浪财经已下线公开的港股历史 K 线接口，仅实时快照可用。
-                # 如需港股历史 K 线，请改用 tencent / eastmoney / akshare 等数据源。
+                # 如需港股历史 K 线，请改用 tencent / eastmoney 等数据源。
                 print(
                     "[SinaQuoteAPI] HK kline is not available on Sina; "
-                    "please use another source (tencent/eastmoney/akshare)."
+                    "please use another source (tencent/eastmoney)."
                 )
                 return []
         except Exception as e:
