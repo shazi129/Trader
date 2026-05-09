@@ -28,6 +28,16 @@ class StockDB:
     """股票数据库管理类（长表版）"""
 
     # ============================================================
+    # 精度控制
+    # ============================================================
+
+    # 不同数据类型的精度（小数位数）
+    PRECISION_PRICE = 4      # 价格类（Open/Close/High/Low）
+    PRECISION_FACTOR = 6     # 因子指标类（MA, MACD, RSI等）
+    PRECISION_RATIO = 6      # 比率类（MA_Ratio, ROC等）
+    PRECISION_VOLATILITY = 6  # 波动率/风险类
+
+    # ============================================================
     # 长表名 & schema 定义
     # ============================================================
 
@@ -38,6 +48,32 @@ class StockDB:
     TABLE_VOLUME = "factor_volume"
     TABLE_RISK = "factor_risk"
     TABLE_MA_RATIO = "factor_ma_ratio"
+
+    @staticmethod
+    def _round(value, precision: int):
+        """四舍五入保留指定小数位数"""
+        if value is None:
+            return None
+        try:
+            return round(float(value), precision)
+        except (ValueError, TypeError):
+            return value
+
+    def _round_kline(self, data: dict) -> dict:
+        """K线数据四舍五入（价格保留4位）"""
+        p = self.PRECISION_PRICE
+        for key in ["Open", "Close", "High", "Low", "Turnover"]:
+            if key in data:
+                data[key] = self._round(data[key], p)
+        return data
+
+    def _round_factor(self, data: dict) -> dict:
+        """因子数据四舍五入（因子保留6位）"""
+        p = self.PRECISION_FACTOR
+        for key in data:
+            if key not in ["Symbol", "Date"]:
+                data[key] = self._round(data[key], p)
+        return data
 
     # 原始K线表
     _kline_columns = {
@@ -135,9 +171,9 @@ class StockDB:
         self._connection = sqlite3.connect(self._db_file)
         self._cursor = self._connection.cursor()
 
-        # 启用外键、WAL 提升并发读
+        # 传统模式：DELETE journal，关闭 WAL
         try:
-            self._cursor.execute("PRAGMA journal_mode=WAL")
+            self._cursor.execute("PRAGMA journal_mode=DELETE")
             self._cursor.fetchall()
         except sqlite3.Error:
             pass
@@ -277,7 +313,7 @@ class StockDB:
     # ============================================================
 
     def parse_kline(self, kline: KlineData) -> dict:
-        return {
+        data = {
             "Date": kline.date,
             "Open": kline.open,
             "Close": kline.close,
@@ -287,6 +323,7 @@ class StockDB:
             "Turnover": kline.turnover,
             "TurnoverRate": kline.turnover_rate,
         }
+        return self._round_kline(data)
 
     def write_kline_data(self, name: str, kline: KlineData):
         """写入一条K线数据（带 Symbol）"""
@@ -354,7 +391,7 @@ class StockDB:
     # ============================================================
 
     def parse_indicator(self, indicator: KlineIndicator) -> dict:
-        return {
+        data = {
             "Date": indicator.date,
             "MA5": indicator.ma5, "MA10": indicator.ma10, "MA20": indicator.ma20,
             "MA30": indicator.ma30, "MA60": indicator.ma60,
@@ -365,18 +402,20 @@ class StockDB:
             "RSI1": indicator.rsi1, "RSI2": indicator.rsi2, "RSI3": indicator.rsi3,
             "ADOSC": indicator.adosc,
         }
+        return self._round_factor(data)
 
     def parse_trend(self, indicator: KlineIndicator) -> dict:
-        return {
+        data = {
             "Date": indicator.date,
             "EMA12": indicator.ema12, "EMA26": indicator.ema26, "EMA50": indicator.ema50,
             "MACD_HIST": indicator.macd_hist,
             "ADX": indicator.adx, "Plus_DI": indicator.plus_di, "Minus_DI": indicator.minus_di,
             "TR": indicator.tr, "ATR": indicator.atr, "ATR_PCT": indicator.atr_pct,
         }
+        return self._round_factor(data)
 
     def parse_momentum(self, indicator: KlineIndicator) -> dict:
-        return {
+        data = {
             "Date": indicator.date,
             "MOM1W": indicator.mom1w, "MOM2W": indicator.mom2w, "MOM1M": indicator.mom1m,
             "MOM3M": indicator.mom3m, "MOM6M": indicator.mom6m,
@@ -386,9 +425,10 @@ class StockDB:
             "ROC9M": indicator.roc9m, "ROC12M": indicator.roc12m,
             "CCI": indicator.cci, "WilliamsR": indicator.williams_r,
         }
+        return self._round_factor(data)
 
     def parse_volume(self, indicator: KlineIndicator) -> dict:
-        return {
+        data = {
             "Date": indicator.date,
             "OBV": indicator.obv, "VPT": indicator.vpt, "ADL": indicator.adl,
             "MFI": indicator.mfi,
@@ -396,18 +436,20 @@ class StockDB:
             "ForceIndex13": indicator.force_index13,
             "ForceIndex21": indicator.force_index21,
         }
+        return self._round_factor(data)
 
     def parse_risk(self, indicator: KlineIndicator) -> dict:
-        return {
+        data = {
             "Date": indicator.date,
             "HV20": indicator.hv20, "HV60": indicator.hv60,
             "MaxDrawdown": indicator.max_drawdown, "Volatility": indicator.volatility,
             "Sharpe": indicator.sharpe, "Sortino": indicator.sortino, "Calmar": indicator.calmar,
             "Skewness": indicator.skewness, "Kurtosis": indicator.kurtosis,
         }
+        return self._round_factor(data)
 
     def parse_ma_ratio(self, indicator: KlineIndicator) -> dict:
-        return {
+        data = {
             "Date": indicator.date,
             "MA_Ratio_5": indicator.ma_ratio_5, "MA_Ratio_10": indicator.ma_ratio_10,
             "MA_Ratio_20": indicator.ma_ratio_20, "MA_Ratio_60": indicator.ma_ratio_60,
@@ -416,6 +458,7 @@ class StockDB:
             "MA_Ratio_30W_75W": indicator.ma_ratio_30w_75w,
             "MA_Ratio_5W_30W": indicator.ma_ratio_5w_30w,
         }
+        return self._round_factor(data)
 
     # ============================================================
     # 因子表 - 写入函数
