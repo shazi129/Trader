@@ -212,6 +212,18 @@ class StockDB:
     # 通用建表 / 索引
     # ============================================================
 
+    def drop_all_tables(self):
+        """删除所有长表（测试或重置时使用）"""
+        tables = list(self._TABLE_SCHEMA.keys())
+        for table in tables:
+            try:
+                self._cursor.execute(f"DROP TABLE IF EXISTS {table}")
+                # 同时删除对应的 date 索引（表删了索引也会自动删，但保险起见）
+                self._cursor.execute(f"DROP INDEX IF EXISTS idx_{table}_date")
+            except sqlite3.Error as e:
+                print(f"drop table {table} error: {e}")
+        self._connection.commit()
+
     def _ensure_schema(self):
         """创建所有长表与索引（IF NOT EXISTS）"""
         for table, cols in self._TABLE_SCHEMA.items():

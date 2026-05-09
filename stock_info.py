@@ -38,11 +38,11 @@ class KlineData:
         self.pe:float = 0 #市盈率
 
     def FIELD_NUM():
-        return 9
-    
+        return 8
+
     def parse(self, v: tuple)->bool:
-        if len(v) != 9 or not isinstance(v, tuple):
-            print("KlineData parse error, invalud v:%s" % str(v))
+        if len(v) != 8 or not isinstance(v, tuple):
+            print("KlineData parse error, invalid v:%s" % str(v))
             return False
         self.date = str(v[0])
         self.open = float(v[1])
@@ -52,12 +52,11 @@ class KlineData:
         self.volume = float(v[5])
         self.turnover = float(v[6])
         self.turnover_rate = float(v[7])
-        self.pe = float(v[8])
         return True
 
     def __str__(self) -> str:
         return "date:%s, open:%f, close:%f, high:%f, low:%f, volume:%f, turnover:%f, turnover_rate:%f" % (
-            self.date, self.open, self.close, self.high, self.low, self.volume, self.turnover, self.turnover_rate, self.pe
+            self.date, self.open, self.close, self.high, self.low, self.volume, self.turnover, self.turnover_rate
         )
     
 #k线参数信息
