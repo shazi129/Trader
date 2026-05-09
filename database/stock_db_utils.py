@@ -50,7 +50,6 @@ class StockDB:
         "Volume": "REAL",
         "Turnover": "REAL",
         "TurnoverRate": "REAL",
-        "PE": "REAL",
     }
 
     # 基础技术指标
@@ -287,7 +286,6 @@ class StockDB:
             "Volume": kline.volume,
             "Turnover": kline.turnover,
             "TurnoverRate": kline.turnover_rate,
-            "PE": kline.pe,
         }
 
     def write_kline_data(self, name: str, kline: KlineData):
@@ -308,7 +306,7 @@ class StockDB:
     def get_latest_klines(self, name: str, size: int) -> List[KlineData]:
         """获取最新的 N 条K线（按日期降序，再 parse 为 KlineData）"""
         sql = (
-            "SELECT Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate, PE "
+            "SELECT Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate "
             f"FROM {self.TABLE_KLINE} WHERE Symbol=? ORDER BY Date DESC LIMIT ?"
         )
         try:
@@ -328,7 +326,7 @@ class StockDB:
     ) -> List[KlineData]:
         """按日期区间取K线（升序）"""
         sql = (
-            "SELECT Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate, PE "
+            "SELECT Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate "
             f"FROM {self.TABLE_KLINE} WHERE Symbol=?"
         )
         params: list = [name]
