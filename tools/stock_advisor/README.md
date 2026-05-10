@@ -4,7 +4,13 @@
 
 ## 用法
 
+两种入口方式，效果一样，按你当前 shell 所在目录二选一：
+
+### A. 从项目根目录运行（推荐）
+
 ```bash
+cd D:\GitHub\Trader
+
 # 基本用法（落盘 markdown 到 reports/）
 python -m tools.stock_advisor.stock_advisor Tencent
 
@@ -18,6 +24,34 @@ python -m tools.stock_advisor.stock_advisor Tencent --no-write
 python -m tools.stock_advisor.stock_advisor Tencent --force-refresh
 ```
 
+### B. 从当前目录（`tools\stock_advisor`）直接运行脚本
+
+必须**直接跑 `.py` 文件**，不要加 `-m`（否则相对 import 会报
+`attempted relative import with no known parent package`）：
+
+```bash
+cd D:\GitHub\Trader\tools\stock_advisor
+
+python stock_advisor.py Tencent
+python stock_advisor.py Alibaba --api eastmoney --top-k 80
+python stock_advisor.py Tencent --no-write
+python stock_advisor.py Tencent --force-refresh
+```
+
+脚本顶部会自动把项目根加进 `sys.path`，所以 `database` / `quantitative`
+等顶层包都能正常 import。
+
+### 常见错误
+
+- `ModuleNotFoundError: No module named 'tools'`
+  → 你在 `tools\stock_advisor` 子目录里跑了 `-m tools.stock_advisor.xxx`。
+  用方案 A（回根目录）或方案 B（直接跑文件）。
+- `attempted relative import with no known parent package`
+  → 你在子目录里跑了 `python -m stock_advisor`。
+  同样改用方案 A 或 B。
+- `python -m stock_advisor.py ...`
+  → `-m` 后面跟的是**模块名**不是文件名，不能带 `.py` 后缀。
+
 ## 流程
 
 1. **数据加载**：先查 DB；若 K 线最新日 ≠ 因子表最新日，触发
@@ -30,10 +64,14 @@ python -m tools.stock_advisor.stock_advisor Tencent --force-refresh
 
 ## 报告结构
 
-- `1. 综合判断`：单点多因子加权 → 当前看涨/看跌力量
-- `2. 多周期涨跌预测`：短(5日) / 中(20日) / 长(60日) 三档历史频率
+- `1. 当前状态评分`：单点多因子加权 → **此刻**多空力量快照（非预测）
+- `2. 多周期涨跌预测`：短(5日) / 中(20日) / 长(60日) 三档历史相似态频率
 - `3. 因子明细`：每个因子的具体读数与信号
 - `4. 风险提示`
+
+> 第 1 节与第 2 节方向相反是正常的：
+> 比如当前超卖（第 1 节偏空），但历史上每次跌到此位后多数反弹（第 2 节偏多），
+> 这是均值回归现象。
 
 ## 历史相似态算法（核心）
 

@@ -78,39 +78,24 @@ python test/test_cached_api.py
 
 ## 数据库表结构
 
-缓存API使用 `StockDB` 管理数据库，会自动为每只股票创建以下表：
+`CachedQuoteAPI` 写入的表与 `quantitative.factor_batch` / `kline_fetcher` 共用同一份
+schema —— **当前已经是「长表方案」**：1 张 K 线表 + 6 张因子表，复合主键
+`(Symbol, Date)`，不再为每只股票单独建表。
 
-- **原始数据表** (表名：股票名，如 `Tencent`)
-  - Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate, PE
-
-- **基础指标表** (表名：股票名+`_Ind`)
-  - Date, MA5, MA10, MA20, MA30, MA60, MA120, MA250, BollUp, BollLow, K, D, J, Dif, Dea, MACD, RSI1, RSI2, RSI3, ADOSC
-
-- **趋势因子表** (表名：股票名+`_Trend`)
-  - Date, EMA12, EMA26, EMA50, MACD_HIST, ADX, Plus_DI, Minus_DI, TR, ATR, ATR_PCT
-
-- **动量因子表** (表名：股票名+`_Momentum`)
-  - Date, MOM1W, MOM2W, MOM1M, MOM3M, MOM6M, MOM9M, MOM12M, ROC1W, ROC2W, ROC1M, ROC3M, ROC6M, ROC9M, ROC12M, CCI, WilliamsR
-
-- **成交量因子表** (表名：股票名+`_Volume`)
-  - Date, OBV, VPT, ADL, MFI, ForceIndex1, ForceIndex13, ForceIndex21
-
-- **风险指标表** (表名：股票名+`_Risk`)
-  - Date, HV20, HV60, MaxDrawdown, Volatility, Sharpe, Sortino, Calmar, Skewness, Kurtosis
-
-- **均线比率表** (表名：股票名+`_MA_Ratio`)
-  - Date, MA_Ratio_5, MA_Ratio_10, MA_Ratio_20, MA_Ratio_60, MA_Ratio_200, MA200, MA30W, MA75W, MA_Ratio_30W_75W, MA_Ratio_5W_30W
+完整 schema、字段-属性对照、常用 SQL 模板请看 [data_schema.md](data_schema.md)。
 
 ## 注意事项
 
-1. **数据库路径**：默认使用 `database/stock_data.db`，可在 `StockDB` 初始化时指定
-2. **数据更新**：缓存API不会自动更新数据，需要手动删除数据库或实现更新逻辑
-3. **日期范围**：当前实现会读取 `limit or 1000` 条数据，然后按日期范围过滤
-4. **基本面数据**：暂不缓存，直接透传到真实API
+1. **数据库路径**：默认 `database/stock_data.db`，可在 `StockDB(db_path=...)` 指定。
+2. **数据更新**：`CachedQuoteAPI` 自身不做"过期判断"，日常增量请走
+   [`tools/kline_fetcher`](../tools/kline_fetcher/README.md) ——
+   它写库后会**自动调** `compute_and_save_factors` 同步刷新因子表。
+3. **基本面数据**：暂不缓存，直接透传到真实 API。
+4. **多进程并发写**：`StockDB` 默认 `journal_mode=DELETE` 单连接，不为并发写设计；
+   读并发安全。
 
-## 扩展建议
+## 扩展方向
 
-1. **自动更新**：添加逻辑，检查数据库数据是否最新，如果不是则自动更新
-2. **批量预取**：支持一次性拉取多只股票的并缓存
-3. **缓存过期**：添加缓存过期时间，自动刷新过期数据
-4. **错误处理**：增强错误处理，API失败时有降级方案
+- **缓存过期**：在 `CachedQuoteAPI.get_klines` 里加最新日期与今天的差值判断。
+- **批量预取**：循环调 `compute_and_save_factors` 已经够用，必要时可改成异步。
+- **错误降级**：在 `QuoteAPIFactory` 注册多源，捕获异常后切换。

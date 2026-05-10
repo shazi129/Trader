@@ -46,7 +46,13 @@ from quote_api.quote_base import DailyQuote  # noqa: E402
 from quantitative.factor_data import KlineIndicator  # noqa: E402
 from utils.logger import get_logger  # noqa: E402
 
-from .backtester import HorizonBacktester, MultiHorizonForecast  # noqa: E402
+# 直接跑文件（python stock_advisor.py）时 __package__ 为空，相对 import 会失败；
+# 走 -m 时 __package__ 为 "tools.stock_advisor"，相对 import 才有效。
+# 用 try/except 兼容两种入口。
+try:
+    from .backtester import HorizonBacktester, MultiHorizonForecast  # noqa: E402
+except ImportError:
+    from backtester import HorizonBacktester, MultiHorizonForecast  # type: ignore  # noqa: E402
 
 _log = get_logger(__name__)
 

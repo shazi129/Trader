@@ -1,2 +1,80 @@
-后台运行：
-start /b python stock_widget.py
+# stock_widget — 桌面浮窗实时报价
+
+极简 PySide6 浮窗：无边框、半透明、置顶、可拖动，右键菜单切股票 / 切数据源 /
+刷新 / 退出。只显示价格，不显示走势图（这是刻意的：小而不扰）。
+
+## 启动
+
+```cmd
+:: 前台（带终端、Ctrl+C 退出）
+python tools/stock_widget/stock_widget.py
+
+:: 后台常驻（Windows）
+start /b python tools\stock_widget\stock_widget.py
+```
+
+从子目录里跑也行（脚本头部做了 `sys.path` 兜底）：
+
+```cmd
+cd tools\stock_widget
+python stock_widget.py
+```
+
+## 配置文件 `config.json`
+
+```json
+{
+    "api": "sina",
+    "stocks": [
+        { "name_key": "Tencent",  "name": "腾讯",     "show": true  },
+        { "name_key": "Alibaba",  "name": "阿里巴巴", "show": false },
+        { "name_key": "COMEX_AG", "name": "Comex白银","show": false }
+    ],
+    "refresh_interval": 60,
+    "opacity": 0.75,
+    "font_size": 12,
+    "position": "bottom_right"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `api` | string | 数据源：`"sina"` / `"tencent"` / `"eastmoney"` |
+| `stocks[].name_key` | string | `STOCK_META` 里的逻辑标识（见 `quote_api/stock_meta.py`） |
+| `stocks[].name` | string | 显示名；空串时自动从 `STOCK_META` 取中文名 |
+| `stocks[].show` | bool | 是否显示在浮窗上 |
+| `refresh_interval` | int | 刷新秒数 |
+| `opacity` | float | 窗口透明度 0.0 – 1.0 |
+| `font_size` | int | 字号 |
+| `position` | string | `"top_left"` / `"top_right"` / `"bottom_left"` / `"bottom_right"` |
+
+右键菜单里也能临时切"当前显示的股票"和"数据源"，会落盘回 `config.json`。
+
+## 数据源支持度
+
+| 源 | A 股实时 | 港股实时 | 美股实时 | 备注 |
+|---|---|---|---|---|
+| `sina`       | ✅ | ✅ 快照 | — | **港股没有历史 K 线**，但浮窗只要实时价就够用 |
+| `tencent`    | ✅ | ✅ | ✅ | 推荐 |
+| `eastmoney`  | ✅ | ✅ | ✅ | 偶发反爬 |
+
+对浮窗来说，只要该源实现了 `get_daily_quote(name_key)` 就能用；具体各源对
+哪些 `name_key` 有映射，看 `quote_api/<source>/config.json`。
+
+## 添加一只要显示的股票
+
+1. 确认 `quote_api/stock_meta.py` 的 `STOCK_META` 里有它；没有就先加（见
+   根 [README.md 的"新增一只股票"](../../README.md#新增一只股票)）。
+2. 确认选用的 `api` 对应的 `quote_api/<api>/config.json` 里有 `name_key → 代码` 映射。
+3. 往本 `config.json` 的 `stocks` 列表里加一条，`show: true`。
+
+## 故障排查
+
+- **浮窗打开后一片空白**：大概率是 `api` 字段配的源不支持你列出的某个
+  `name_key`，检查 `quote_api/<api>/config.json` 是否有对应映射。
+- **Windows 上字体模糊**：PySide6 对高 DPI 屏的缩放有时偏糊；可以把
+  `font_size` 调大一点，或者手动给 `python.exe` 关掉系统 DPI 缩放。
+- **右键菜单改了源但没生效**：菜单更新后会立刻写回 `config.json` 并重建
+  API；如果某个源本身没装/不可用，看日志有没有报错。
+- **想改窗口位置但配置里的四个角不够用**：目前只支持四个角的枚举，要自由
+  定位请直接拖动窗口（但不持久化，想持久化请 PR `_save_position`）。
