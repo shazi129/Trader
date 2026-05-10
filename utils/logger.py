@@ -1,145 +1,52 @@
-import inspect
+# -*- coding: utf-8 -*-
+"""轻量日志辅助。
+
+提供 ``get_logger(name)`` 给项目内各模块使用，避免每个文件重复
+``logging.basicConfig`` 之类的样板。
+
+设计原则：
+- **库代码不主动配置根 logger**：本模块仅在第一次被导入时给项目根
+  logger ``trader`` 装一个 StreamHandler（仅当未配置过），日志级别
+  默认 INFO。CLI 入口（如 ``factor_batch.main``、``quant_analyzer.main``）
+  可调用 ``configure_root_level`` 显式调整。
+- 调用方统一用 ``get_logger(__name__)``，输出会在 ``[模块] 信息`` 形式下
+  显示，方便定位。
+"""
+
+from __future__ import annotations
+
 import logging
-import os
-import time
+import sys
+
+_ROOT_NAME = "trader"
+_DEFAULT_FORMAT = "[%(name)s] %(message)s"
+_INITIALIZED = False
 
 
-class Logger(object):
+def _ensure_root_handler() -> None:
+    global _INITIALIZED
+    if _INITIALIZED:
+        return
+    root = logging.getLogger(_ROOT_NAME)
+    if not root.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter(_DEFAULT_FORMAT))
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
+        # 不向 Python 根 logger 冒泡，避免双输出
+        root.propagate = False
+    _INITIALIZED = True
 
-    def __init__(self, logdir="./", filename="utils", to_stream=False,
-                  log_level=logging.DEBUG, for_others=True, log_id=0):
-        self._dir = logdir
-        self._filename = filename
-        self._to_stream = to_stream
-        self._log_level = log_level
-        self._for_others = for_others
-        self._log_id = log_id
-        self._logger = logging.getLogger()
-        self._level_dict = {
-            logging.DEBUG:self._logger.debug,
-            logging.INFO:self._logger.info,
-            logging.WARNING:self._logger.warning,
-            logging.ERROR:self._logger.error,
-            logging.CRITICAL:self._logger.critical
-        }
-        self._current_day = time.strftime("%Y%m%d")
-        self._log_formater = logging.Formatter("[%(levelname)s]:"
-            "[%(asctime)s.%(msecs)03d]:[%(process)d]:%(message)s",
-             "%Y-%m-%d %H:%M:%S")
-        if not os.access(logdir, os.F_OK):
-            try:
-                os.umask(0)
-                os.mkdir(logdir)
-            except Exception:
-                logdir = '/tmp'
 
-        self._file_handler = self._get_file_handler()
-        self._set_logger_format()
+def get_logger(name: str) -> logging.Logger:
+    """返回项目命名空间下的 logger（``trader.<name>``）。"""
+    _ensure_root_handler()
+    # 把外部传入的 ``foo.bar`` 接到 ``trader.foo.bar``，避免污染 Python root
+    suffix = name if name else "app"
+    return logging.getLogger(f"{_ROOT_NAME}.{suffix}")
 
-    def _get_file_handler(self):
-        try:
-            log_file = self._dir + "/" + self._filename + "_" + self._current_day + ".log"
-            return logging.FileHandler(log_file)
-        except Exception:
-            log_file = "/tmp" + "/" + self._filename + "_" + self._current_day + ".log"
-            return logging.FileHandler(log_file)
 
-    def _set_logger_format(self):
-        self._file_handler.setFormatter(self._log_formater)
-        self._logger.setLevel(self._log_level)
-        self._logger.addHandler(self._file_handler)
-        if self._to_stream:
-            streamhandler = logging.StreamHandler()
-            streamhandler.setFormatter(self._log_formater)
-            if (streamhandler not in self._logger.handlers
-                    and len(self._logger.handlers) < 2):
-                self._logger.addHandler(streamhandler)
-
-    def _update_logger(self):
-        today = time.strftime("%Y%m%d");
-        if today != self._current_day:
-            self._current_day = today
-            self._file_handler.close()
-            self._logger.handlers = []
-            self._file_handler = self._get_file_handler()
-            self._set_logger_format()
-
-    def log(self, level, msg, *args, **kwargs):
-        if self._for_others:
-            frame_obj = inspect.currentframe().f_back.f_back
-        else:
-            frame_obj = inspect.currentframe().f_back
-        msg_pre = "%s %s %s" %(os.path.basename(frame_obj.f_code.co_filename),
-                               frame_obj.f_code.co_name, frame_obj.f_lineno)
-        self._update_logger()
-        self._level_dict[level]("[%s]:[%s]:%s" % (self._log_id, msg_pre, msg),
-                                                              *args, **kwargs)
-
-    def update_id(self, log_id=None):
-        """"""
-        if log_id != None:
-            self._log_id = log_id
-            return
-        try:
-            self._log_id = int(self._log_id)
-        except:
-            self._log_id = 1
-        self._log_id = self._log_id + 1
-
-    @staticmethod
-    def create(module):
-        if module in Log.logger_buffer:
-            return Log.logger_buffer[module]
-        logger = Logger(logdir=Log.dir, filename=module, to_stream=Log.to_stream,
-                        log_level=Log.level)
-        Log.logger_buffer[module] = logger
-        return logger
-
-    @staticmethod
-    def update_id(log_id=None, module=None):
-        if module == None:
-            module = Log.pref
-        if Log.enable:
-            Log.create(module).update_id(log_id)
-
-    @staticmethod
-    def info(msg, module=None, *args, **kwargs):
-        if module == None:
-            module = Log.pref
-        if Log.enable:
-            Log.create(module).log(logging.INFO, msg)
-
-    @staticmethod
-    def debug(msg, module=None, *args, **kwargs):
-        if module == None:
-            module = Log.pref
-        if Log.enable:
-            Log.create(module).log(logging.DEBUG, msg)
-
-    @staticmethod
-    def warning(msg, module=None, *args, **kwargs):
-        if module == None:
-            module = Log.pref
-        if Log.enable:
-            Log.create(module).log(logging.WARNING, msg)
-
-    @staticmethod
-    def error(msg, module=None, *args, **kwargs):
-        if module == None:
-            module = Log.pref
-        if Log.enable:
-            Log.create(module).log(logging.ERROR, msg)
-
-    @staticmethod
-    def crit(msg, module=None, *args, **kwargs):
-        if module == None:
-            module = Log.pref
-        if Log.enable:
-            Log.create(module).log(logging.CRITICAL, msg)
-            
-if __name__ == "__main__":
-    Logger.debug("debug")
-    Logger.info("info")
-    Logger.warning("warning")
-    Logger.error("error")
-    Logger.crit("crit")
+def configure_root_level(level: int | str) -> None:
+    """调整项目根 logger 的级别（CLI 入口可用）。"""
+    _ensure_root_handler()
+    logging.getLogger(_ROOT_NAME).setLevel(level)

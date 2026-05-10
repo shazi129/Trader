@@ -1,35 +1,54 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-批量计算并保存因子到数据库
+"""批量计算并保存因子到数据库。
 
-为指定股票计算所有因子，并保存到对应的数据库表：
-- {name}_Trend: 趋势类因子
-- {name}_Momentum: 动量类因子
-- {name}_Volume: 成交量类因子
-- {name}_Risk: 风险指标
-- {name}_MA_Ratio: 均线比率
+`FactorSeriesEngine` 把整段 K 线序列一次性算完所有因子，输出
+`KlineIndicator` 列表；底层算法全部委托给 `quantitative.indicators.*`，
+不再重复实现 EMA/SMA/TR/+DM/-DM/Wilder smoothing 等基础原语。
 """
 
 from __future__ import annotations
 
-import sys
-import math
 import argparse
+import sys
+from contextlib import closing
 from pathlib import Path
 from typing import Optional
-from datetime import datetime
 
-# 项目根目录
+# 项目根目录（保留以兼容 `python factor_batch.py` 直接调用；
+# 推荐用 `python -m quantitative.factor_batch`）
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from stock_info import KlineData, KlineIndicator
+from quantitative.factor_data import KlineIndicator
+from quantitative.indicators.trend import macd as ti_macd, atr as ti_atr, adx as ti_adx, bollinger as ti_boll
+from quantitative.indicators.momentum import (
+    rsi as ti_rsi,
+    kdj as ti_kdj,
+    momentum_pct,
+    cci as ti_cci,
+    williams_r as ti_williams_r,
+)
+from quantitative.indicators.volume import (
+    obv as ti_obv,
+    vpt as ti_vpt,
+    adl as ti_adl,
+    mfi as ti_mfi,
+    force_index as ti_force_index,
+)
+from quantitative.indicators.risk import (
+    historical_volatility_series,
+    max_drawdown_series,
+    rolling_sharpe_sortino_calmar,
+    rolling_skew_kurt,
+)
 from database.stock_db_utils import StockDB
 from quote_api import QuoteAPIFactory
-from quote_api.cached_api import CachedQuoteAPI
 from quote_api.quote_base import DailyQuote
+from utils.logger import get_logger
+
+_log = get_logger(__name__)
 
 
 # ===========================================================================
@@ -37,7 +56,14 @@ from quote_api.quote_base import DailyQuote
 # ===========================================================================
 
 class FactorSeriesEngine:
-    """计算所有时间点的因子序列，输出 KlineIndicator 列表"""
+    """计算所有时间点的因子序列，输出 KlineIndicator 列表。
+
+    实现策略：
+    - 所有底层算法通过 `quantitative.indicators` 包共享，避免与
+      `quant_analyzer` 中的 QuantFactorEngine 重复实现。
+    - 各 `_compute_*` 方法只负责把"序列结果"回填到对应的
+      KlineIndicator 字段上。
+    """
 
     def __init__(self, quotes: list[DailyQuote]):
         self.quotes = quotes
@@ -48,601 +74,273 @@ class FactorSeriesEngine:
         self.volumes = [q.volume for q in quotes]
         self.dates = [q.date for q in quotes]
 
+    # ------------------------------------------------------------------
+    # 主入口
+    # ------------------------------------------------------------------
     def compute_all(self) -> list[KlineIndicator]:
-        """计算所有因子，返回 KlineIndicator 列表"""
-        indicators = []
+        indicators = [KlineIndicator() for _ in range(self.n)]
         for i in range(self.n):
-            ind = KlineIndicator()
-            ind.date = self.dates[i]
-            indicators.append(ind)
+            indicators[i].date = self.dates[i]
 
-        # 计算各类因子
         self._compute_ma(indicators)
         self._compute_bollinger(indicators)
         self._compute_kdj(indicators)
         self._compute_macd(indicators)
         self._compute_rsi(indicators)
         self._compute_ema_trend(indicators)
-        self._compute_atr(indicators)
-        self._compute_adx(indicators)
+        self._compute_atr_adx(indicators)
         self._compute_momentum(indicators)
         self._compute_volume_factors(indicators)
         self._compute_risk_factors(indicators)
         self._compute_ma_ratios(indicators)
-
         return indicators
 
-    # -----------------------------------------------------------------------
-    # 均线系统
-    # -----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 均线
+    # ------------------------------------------------------------------
+    _MA_PERIODS = (
+        (5, "ma5"), (10, "ma10"), (20, "ma20"),
+        (30, "ma30"), (60, "ma60"), (120, "ma120"), (250, "ma250"),
+    )
+
     def _compute_ma(self, indicators: list[KlineIndicator]):
-        """计算MA5/10/20/30/60/120/250"""
-        for i in range(self.n):
-            for period in [5, 10, 20, 30, 60, 120, 250]:
-                if i >= period - 1:
-                    ma_val = sum(self.closes[i - period + 1:i + 1]) / period
-                    if period == 5:
-                        indicators[i].ma5 = ma_val
-                    elif period == 10:
-                        indicators[i].ma10 = ma_val
-                    elif period == 20:
-                        indicators[i].ma20 = ma_val
-                    elif period == 30:
-                        indicators[i].ma30 = ma_val
-                    elif period == 60:
-                        indicators[i].ma60 = ma_val
-                    elif period == 120:
-                        indicators[i].ma120 = ma_val
-                    elif period == 250:
-                        indicators[i].ma250 = ma_val
+        # 用增量和实现 O(n) MA，避免每根 bar 重新求和（原版本是 O(n*period)）
+        for period, attr in self._MA_PERIODS:
+            if self.n < period:
+                continue
+            window_sum = sum(self.closes[:period])
+            setattr(indicators[period - 1], attr, window_sum / period)
+            for i in range(period, self.n):
+                window_sum += self.closes[i] - self.closes[i - period]
+                setattr(indicators[i], attr, window_sum / period)
 
     def _compute_ma_ratios(self, indicators: list[KlineIndicator]):
-        """计算均线比率"""
+        # MA200 / 200日比 / 5/10/20/60 与收盘比
+        if self.n >= 200:
+            window_sum = sum(self.closes[:200])
+            indicators[199].ma200 = window_sum / 200
+            for i in range(200, self.n):
+                window_sum += self.closes[i] - self.closes[i - 200]
+                indicators[i].ma200 = window_sum / 200
         for i in range(self.n):
-            if i >= 199:  # 需要200日
-                indicators[i].ma200 = sum(self.closes[i - 199:i + 1]) / 200
-                indicators[i].ma_ratio_200 = self.closes[i] / indicators[i].ma200 if indicators[i].ma200 != 0 else 0
-                indicators[i].ma_ratio_5 = self.closes[i] / indicators[i].ma5 if indicators[i].ma5 != 0 else 0
-                indicators[i].ma_ratio_10 = self.closes[i] / indicators[i].ma10 if indicators[i].ma10 != 0 else 0
-                indicators[i].ma_ratio_20 = self.closes[i] / indicators[i].ma20 if indicators[i].ma20 != 0 else 0
-                indicators[i].ma_ratio_60 = self.closes[i] / indicators[i].ma60 if indicators[i].ma60 != 0 else 0
+            ind = indicators[i]
+            if ind.ma200:
+                ind.ma_ratio_200 = self.closes[i] / ind.ma200
+            if ind.ma5:
+                ind.ma_ratio_5 = self.closes[i] / ind.ma5
+            if ind.ma10:
+                ind.ma_ratio_10 = self.closes[i] / ind.ma10
+            if ind.ma20:
+                ind.ma_ratio_20 = self.closes[i] / ind.ma20
+            if ind.ma60:
+                ind.ma_ratio_60 = self.closes[i] / ind.ma60
 
-            # 周线均线（近似）
-            if i >= 149:  # 30周 ≈ 150日
-                ma30w = sum(self.closes[i - 149:i + 1]) / 150
-                indicators[i].ma30w = ma30w
-            if i >= 374:  # 75周 ≈ 375日
-                ma75w = sum(self.closes[i - 374:i + 1]) / 375
-                indicators[i].ma75w = ma75w
-                if ma30w != 0:
-                    indicators[i].ma_ratio_30w_75w = ma30w / ma75w
-                if indicators[i].ma30w != 0:
-                    indicators[i].ma_ratio_5w_30w = (sum(self.closes[i - 24:i + 1]) / 25) / indicators[i].ma30w
+        # 周线均线（近似：30 周 ≈ 150 日，75 周 ≈ 375 日，5 周 ≈ 25 日）
+        if self.n >= 150:
+            for i in range(149, self.n):
+                indicators[i].ma30w = sum(self.closes[i - 149:i + 1]) / 150
+        if self.n >= 375:
+            for i in range(374, self.n):
+                indicators[i].ma75w = sum(self.closes[i - 374:i + 1]) / 375
+                if indicators[i].ma75w:
+                    indicators[i].ma_ratio_30w_75w = indicators[i].ma30w / indicators[i].ma75w
+        if self.n >= 150:  # 5W/30W 至少需要 30 周
+            for i in range(149, self.n):
+                if indicators[i].ma30w and self.n - 1 - i >= 0 and i >= 24:
+                    ma5w = sum(self.closes[i - 24:i + 1]) / 25
+                    indicators[i].ma_ratio_5w_30w = ma5w / indicators[i].ma30w
 
-    # -----------------------------------------------------------------------
-    # 布林带
-    # -----------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 布林带 / KDJ / MACD / RSI / EMA / ATR / ADX
+    # ------------------------------------------------------------------
     def _compute_bollinger(self, indicators: list[KlineIndicator], period: int = 20):
-        """计算布林带"""
+        boll = ti_boll(self.closes, period=period, k=2.0)
         for i in range(self.n):
-            if i >= period - 1:
-                window = self.closes[i - period + 1:i + 1]
-                sma = sum(window) / period
-                variance = sum((x - sma) ** 2 for x in window) / period
-                std = variance ** 0.5
-                indicators[i].boll_up = sma + 2 * std
-                indicators[i].boll_low = sma - 2 * std
+            up, lo = boll.upper[i], boll.lower[i]
+            if up == up:  # not nan
+                indicators[i].boll_up = up
+                indicators[i].boll_low = lo
 
-    # -----------------------------------------------------------------------
-    # KDJ
-    # -----------------------------------------------------------------------
     def _compute_kdj(self, indicators: list[KlineIndicator], period: int = 9):
-        """计算KDJ"""
-        k_vals = [50.0]
-        d_vals = [50.0]
+        res = ti_kdj(self.highs, self.lows, self.closes, period=period)
         for i in range(self.n):
-            if i < period - 1:
-                rsv = 50.0
-            else:
-                low_n = min(self.lows[i - period + 1:i + 1])
-                high_n = max(self.highs[i - period + 1:i + 1])
-                if high_n == low_n:
-                    rsv = 50.0
-                else:
-                    rsv = (self.closes[i] - low_n) / (high_n - low_n) * 100
-            k = 2.0 / 3 * k_vals[-1] + 1.0 / 3 * rsv
-            d = 2.0 / 3 * d_vals[-1] + 1.0 / 3 * k
-            k_vals.append(k)
-            d_vals.append(d)
-            indicators[i].k = k
-            indicators[i].d = d
-            indicators[i].j = 3 * k - 2 * d
+            indicators[i].k = res.k[i]
+            indicators[i].d = res.d[i]
+            indicators[i].j = res.j[i]
 
-    # -----------------------------------------------------------------------
-    # MACD
-    # -----------------------------------------------------------------------
     def _compute_macd(self, indicators: list[KlineIndicator]):
-        """计算MACD"""
-        ema12 = self._ema(self.closes, 12)
-        ema26 = self._ema(self.closes, 26)
-        dif = [ema12[i] - ema26[i] for i in range(self.n)]
-        dea = self._ema(dif, 9)
+        res = ti_macd(self.closes, fast=12, slow=26, signal=9)
         for i in range(self.n):
-            indicators[i].ema12 = ema12[i]
-            indicators[i].ema26 = ema26[i]
-            indicators[i].dif = dif[i]
-            indicators[i].dea = dea[i]
-            indicators[i].macd = dif[i] - dea[i]
-            indicators[i].macd_hist = dif[i] - dea[i]
+            indicators[i].ema12 = res.ema_fast[i]
+            indicators[i].ema26 = res.ema_slow[i]
+            indicators[i].dif = res.dif[i]
+            indicators[i].dea = res.dea[i]
+            indicators[i].macd = res.hist[i]
+            indicators[i].macd_hist = res.hist[i]
 
-    # -----------------------------------------------------------------------
-    # RSI
-    # -----------------------------------------------------------------------
     def _compute_rsi(self, indicators: list[KlineIndicator], period: int = 14):
-        """计算RSI"""
-        gains = [0.0]
-        losses = [0.0]
-        for i in range(1, self.n):
-            diff = self.closes[i] - self.closes[i - 1]
-            gains.append(max(diff, 0))
-            losses.append(max(-diff, 0))
-        
-        avg_gain = self._sma(gains, period)
-        avg_loss = self._sma(losses, period)
-        
+        # 使用 simple 模式与历史入库数据保持一致（旧实现是窗口内简单平均）。
+        # QuantFactorEngine 的单点 RSI 走标准 Wilder（默认值）以做信号判断，
+        # 二者分工明确：批量入库 = 长期可比；单点信号 = 教科书定义。
+        rsi_seq = ti_rsi(self.closes, period=period, mode="simple")
         for i in range(self.n):
-            if i >= period:
-                if avg_loss[i] == 0:
-                    indicators[i].rsi1 = 100.0
-                else:
-                    rs = avg_gain[i] / avg_loss[i]
-                    indicators[i].rsi1 = 100 - (100 / (1 + rs))
-                indicators[i].rsi2 = indicators[i].rsi1  # 简化：rsi2=rsi1
-                indicators[i].rsi3 = indicators[i].rsi1  # 简化：rsi3=rsi1
+            v = rsi_seq[i]
+            if v != v:  # nan -> 留默认 0
+                continue
+            indicators[i].rsi1 = v
+            indicators[i].rsi2 = v
+            indicators[i].rsi3 = v
 
-    # -----------------------------------------------------------------------
-    # EMA趋势因子
-    # -----------------------------------------------------------------------
     def _compute_ema_trend(self, indicators: list[KlineIndicator]):
-        """计算EMA12/26/50"""
-        ema12 = self._ema(self.closes, 12)
-        ema26 = self._ema(self.closes, 26)
-        ema50 = self._ema(self.closes, 50)
+        # MACD 已写入 ema12/ema26；这里补 ema50
+        from quantitative.indicators.primitives import ema as ti_ema
+        ema50 = ti_ema(self.closes, 50)
         for i in range(self.n):
-            indicators[i].ema12 = ema12[i]
-            indicators[i].ema26 = ema26[i]
             indicators[i].ema50 = ema50[i]
 
-    # -----------------------------------------------------------------------
-    # ATR & ADX
-    # -----------------------------------------------------------------------
-    def _compute_atr(self, indicators: list[KlineIndicator], period: int = 14):
-        """计算ATR"""
-        tr = self._true_range()
+    def _compute_atr_adx(self, indicators: list[KlineIndicator], period: int = 14):
+        atr_res = ti_atr(self.highs, self.lows, self.closes, period=period)
+        adx_res = ti_adx(self.highs, self.lows, self.closes, period=period)
         for i in range(self.n):
-            indicators[i].tr = tr[i]
-        
-        # ATR (Wilder's smoothing)
-        atr = []
-        s = 0.0
-        for i in range(self.n):
-            if i == 0:
-                s = tr[i]
-            else:
-                s = s - s / period + tr[i]
-            atr.append(s)
-            indicators[i].atr = s
-            indicators[i].atr_pct = s / self.closes[i] * 100 if self.closes[i] != 0 else 0
+            indicators[i].tr = atr_res.tr[i]
+            indicators[i].atr = atr_res.atr[i]
+            indicators[i].atr_pct = atr_res.atr_pct[i]
+            indicators[i].plus_di = adx_res.plus_di[i]
+            indicators[i].minus_di = adx_res.minus_di[i]
+            indicators[i].adx = adx_res.adx[i]
 
-    def _compute_adx(self, indicators: list[KlineIndicator], period: int = 14):
-        """计算ADX"""
-        tr = self._true_range()
-        pdm = self._plus_dm(period)
-        mdm = self._minus_dm(period)
-        
-        tr14 = self._smooth(tr, period)
-        pdm14 = self._smooth(pdm, period)
-        mdm14 = self._smooth(mdm, period)
-        
-        pdi = [pdm14[i] / tr14[i] * 100 if tr14[i] != 0 else 0.0 for i in range(self.n)]
-        mdi = [mdm14[i] / tr14[i] * 100 if tr14[i] != 0 else 0.0 for i in range(self.n)]
-        
-        dx_list = []
-        for i in range(self.n):
-            denom = pdi[i] + mdi[i]
-            dx = 100 * abs(pdi[i] - mdi[i]) / denom if denom != 0 else 0.0
-            dx_list.append(dx)
-        
-        adx_vals = self._smooth(dx_list, period)
-        
-        for i in range(self.n):
-            indicators[i].plus_di = pdi[i]
-            indicators[i].minus_di = mdi[i]
-            indicators[i].adx = adx_vals[i]
+    # ------------------------------------------------------------------
+    # 动量 / 量价 / 风险
+    # ------------------------------------------------------------------
+    _MOM_PERIODS = (
+        (5, "mom1w", "roc1w"),
+        (10, "mom2w", "roc2w"),
+        (21, "mom1m", "roc1m"),
+        (63, "mom3m", "roc3m"),
+        (126, "mom6m", "roc6m"),
+        (189, "mom9m", "roc9m"),
+        (252, "mom12m", "roc12m"),
+    )
 
-    # -----------------------------------------------------------------------
-    # 动量因子
-    # -----------------------------------------------------------------------
     def _compute_momentum(self, indicators: list[KlineIndicator]):
-        """计算动量因子"""
-        for i in range(self.n):
-            # MOM (N日价格变化百分比)
-            for period, attr in [(5, 'mom1w'), (10, 'mom2w'), (21, 'mom1m'), 
-                                  (63, 'mom3m'), (126, 'mom6m'), (189, 'mom9m'), (252, 'mom12m')]:
+        for period, mom_attr, roc_attr in self._MOM_PERIODS:
+            seq = momentum_pct(self.closes, period)
+            for i in range(self.n):
                 if i >= period:
-                    ret = (self.closes[i] / self.closes[i - period] - 1) * 100
-                    setattr(indicators[i], attr, ret)
-            
-            # ROC (Rate of Change)
-            for period, attr in [(5, 'roc1w'), (10, 'roc2w'), (21, 'roc1m'),
-                                  (63, 'roc3m'), (126, 'roc6m'), (189, 'roc9m'), (252, 'roc12m')]:
-                if i >= period:
-                    ret = (self.closes[i] / self.closes[i - period] - 1) * 100
-                    setattr(indicators[i], attr, ret)
-        
-        # CCI
-        self._compute_cci(indicators)
-        # Williams %R
-        self._compute_williams_r(indicators)
+                    setattr(indicators[i], mom_attr, seq[i])
+                    setattr(indicators[i], roc_attr, seq[i])
 
-    def _compute_cci(self, indicators: list[KlineIndicator], period: int = 20):
-        """计算CCI"""
+        cci_seq = ti_cci(self.highs, self.lows, self.closes, period=20)
+        wr_seq = ti_williams_r(self.highs, self.lows, self.closes, period=14)
         for i in range(self.n):
-            if i >= period - 1:
-                window = [(self.highs[j] + self.lows[j] + self.closes[j]) / 3 
-                         for j in range(i - period + 1, i + 1)]
-                ma_tp = sum(window) / period
-                md = sum(abs(x - ma_tp) for x in window) / period
-                tp = (self.highs[i] + self.lows[i] + self.closes[i]) / 3
-                indicators[i].cci = (tp - ma_tp) / (0.015 * md) if md != 0 else 0
+            indicators[i].cci = cci_seq[i]
+            indicators[i].williams_r = wr_seq[i]
 
-    def _compute_williams_r(self, indicators: list[KlineIndicator], period: int = 14):
-        """计算Williams %R"""
-        for i in range(self.n):
-            start = max(0, i - period + 1)
-            high_n = max(self.highs[start:i + 1])
-            low_n = min(self.lows[start:i + 1])
-            if high_n == low_n:
-                indicators[i].williams_r = -50.0
-            else:
-                indicators[i].williams_r = (high_n - self.closes[i]) / (high_n - low_n) * -100
-
-    # -----------------------------------------------------------------------
-    # 成交量因子
-    # -----------------------------------------------------------------------
     def _compute_volume_factors(self, indicators: list[KlineIndicator]):
-        """计算成交量因子"""
-        # OBV
-        obv = [0.0]
-        for i in range(1, self.n):
-            if self.closes[i] > self.closes[i - 1]:
-                obv.append(obv[-1] + self.volumes[i])
-            elif self.closes[i] < self.closes[i - 1]:
-                obv.append(obv[-1] - self.volumes[i])
-            else:
-                obv.append(obv[-1])
+        obv_seq = ti_obv(self.closes, self.volumes)
+        vpt_seq = ti_vpt(self.closes, self.volumes)
+        adl_seq = ti_adl(self.highs, self.lows, self.closes, self.volumes)
+        mfi_seq = ti_mfi(self.highs, self.lows, self.closes, self.volumes, period=14)
+        f1 = ti_force_index(self.closes, self.volumes, period=1)
+        f13 = ti_force_index(self.closes, self.volumes, period=13)
+        f21 = ti_force_index(self.closes, self.volumes, period=21)
         for i in range(self.n):
-            indicators[i].obv = obv[i]
-        
-        # VPT
-        vpt = [0.0]
-        for i in range(1, self.n):
-            ret = (self.closes[i] - self.closes[i - 1]) / self.closes[i - 1] if self.closes[i - 1] != 0 else 0
-            vpt.append(vpt[-1] + self.volumes[i] * ret)
-        for i in range(self.n):
-            indicators[i].vpt = vpt[i]
-        
-        # ADL
-        adl = [0.0]
-        for i in range(1, self.n):
-            if self.highs[i] == self.lows[i]:
-                clv = 0.0
-            else:
-                clv = ((self.closes[i] - self.lows[i]) - (self.highs[i] - self.closes[i])) / (self.highs[i] - self.lows[i]) * self.volumes[i]
-            adl.append(adl[-1] + clv)
-        for i in range(self.n):
-            indicators[i].adl = adl[i]
-        
-        # MFI (Money Flow Index)
-        self._compute_mfi(indicators)
-        
-        # Force Index
-        for i in range(self.n):
-            if i >= 1:
-                indicators[i].force_index1 = self.closes[i] - self.closes[i - 1]
-            if i >= 13:
-                indicators[i].force_index13 = sum(self.closes[j] - self.closes[j - 1] for j in range(i - 12, i + 1))
-            if i >= 21:
-                indicators[i].force_index21 = sum(self.closes[j] - self.closes[j - 1] for j in range(i - 20, i + 1))
+            indicators[i].obv = obv_seq[i]
+            indicators[i].vpt = vpt_seq[i]
+            indicators[i].adl = adl_seq[i]
+            indicators[i].mfi = mfi_seq[i]
+            indicators[i].force_index1 = f1[i]
+            indicators[i].force_index13 = f13[i]
+            indicators[i].force_index21 = f21[i]
 
-    def _compute_mfi(self, indicators: list[KlineIndicator], period: int = 14):
-        """计算MFI"""
-        for i in range(self.n):
-            if i >= period - 1:
-                positive_flow = 0.0
-                negative_flow = 0.0
-                for j in range(i - period + 1, i + 1):
-                    tp = (self.highs[j] + self.lows[j] + self.closes[j]) / 3
-                    prev_tp = (self.highs[j - 1] + self.lows[j - 1] + self.closes[j - 1]) / 3 if j > 0 else tp
-                    if tp > prev_tp:
-                        positive_flow += tp * self.volumes[j]
-                    else:
-                        negative_flow += tp * self.volumes[j]
-                if negative_flow == 0:
-                    indicators[i].mfi = 100.0
-                else:
-                    mr = positive_flow / negative_flow
-                    indicators[i].mfi = 100 - (100 / (1 + mr))
-
-    # -----------------------------------------------------------------------
-    # 风险因子
-    # -----------------------------------------------------------------------
     def _compute_risk_factors(self, indicators: list[KlineIndicator]):
-        """计算风险因子"""
-        # HV20, HV60
+        hv20 = historical_volatility_series(self.closes, period=20)
+        hv60 = historical_volatility_series(self.closes, period=60)
+        md = max_drawdown_series(self.closes)
+        sharpe, sortino, calmar = rolling_sharpe_sortino_calmar(
+            self.closes, md, period=252
+        )
+        skew, kurt = rolling_skew_kurt(self.closes, period=252)
         for i in range(self.n):
-            if i >= 19:
-                returns = [math.log(self.closes[j] / self.closes[j - 1]) for j in range(i - 18, i + 1)]
-                std = (sum(r ** 2 for r in returns) / 19) ** 0.5
-                indicators[i].hv20 = std * (252 ** 0.5) * 100
-            if i >= 59:
-                returns = [math.log(self.closes[j] / self.closes[j - 1]) for j in range(i - 58, i + 1)]
-                std = (sum(r ** 2 for r in returns) / 59) ** 0.5
-                indicators[i].hv60 = std * (252 ** 0.5) * 100
-        
-        # Max Drawdown
-        for i in range(self.n):
-            peak = max(self.closes[:i + 1])
-            dd = (peak - self.closes[i]) / peak * 100
-            indicators[i].max_drawdown = dd
-        
-        # Sharpe, Sortino, Calmar
-        for i in range(self.n):
-            if i >= 251:  # 需要252个交易日
-                returns = [(self.closes[j] / self.closes[j - 1] - 1) for j in range(i - 251, i + 1) if j > 0]
-                mean_r = sum(returns) / len(returns)
-                std_r = (sum((r - mean_r) ** 2 for r in returns) / (len(returns) - 1)) ** 0.5
-                indicators[i].sharpe = (mean_r / std_r) * (252 ** 0.5) if std_r != 0 else 0
-                
-                # Sortino
-                downsides = [r ** 2 for r in returns if r < 0]
-                dd = (sum(downsides) / len(returns)) ** 0.5
-                indicators[i].sortino = (mean_r / dd) * (252 ** 0.5) if dd != 0 else 0
-                
-                # Calmar
-                max_dd = indicators[i].max_drawdown
-                annual_return = (self.closes[i] / self.closes[i - 252] - 1) * 100 if i >= 252 else 0
-                indicators[i].calmar = annual_return / max_dd if max_dd != 0 else 0
-        
-        # Skewness, Kurtosis
-        for i in range(self.n):
-            if i >= 251:
-                returns = [(self.closes[j] / self.closes[j - 1] - 1) for j in range(i - 251, i + 1) if j > 0]
-                mean_r = sum(returns) / len(returns)
-                std_r = (sum((r - mean_r) ** 2 for r in returns) / len(returns)) ** 0.5
-                if std_r != 0:
-                    skewness = sum((r - mean_r) ** 3 for r in returns) / len(returns) / (std_r ** 3)
-                    kurtosis = sum((r - mean_r) ** 4 for r in returns) / len(returns) / (std_r ** 4) - 3
-                    indicators[i].skewness = skewness
-                    indicators[i].kurtosis = kurtosis
-
-    # -----------------------------------------------------------------------
-    # 工具函数
-    # -----------------------------------------------------------------------
-    def _ema(self, data: list[float], period: int) -> list[float]:
-        """指数移动平均"""
-        result = []
-        multiplier = 2.0 / (period + 1)
-        for i, v in enumerate(data):
-            if i == 0:
-                result.append(v)
-            else:
-                result.append(v * multiplier + result[-1] * (1 - multiplier))
-        return result
-
-    def _sma(self, data: list[float], period: int) -> list[float]:
-        """简单移动平均"""
-        result = []
-        for i in range(len(data)):
-            if i < period:
-                result.append(0.0)
-            else:
-                result.append(sum(data[i - period + 1:i + 1]) / period)
-        return result
-
-    def _true_range(self) -> list[float]:
-        """真实波幅"""
-        tr = []
-        for i in range(self.n):
-            c_prev = self.closes[i - 1] if i > 0 else self.closes[i]
-            tr_val = max(self.highs[i], c_prev) - min(self.lows[i], c_prev)
-            tr.append(tr_val)
-        return tr
-
-    def _plus_dm(self, period: int = 14) -> list[float]:
-        """+DM"""
-        pdm = []
-        for i in range(self.n):
-            if i == 0:
-                pdm.append(0.0)
-            else:
-                up_move = self.highs[i] - self.highs[i - 1]
-                down_move = self.lows[i - 1] - self.lows[i]
-                pdm.append(max(up_move, 0) if up_move > down_move else 0.0)
-        return pdm
-
-    def _minus_dm(self, period: int = 14) -> list[float]:
-        """-DM"""
-        mdm = []
-        for i in range(self.n):
-            if i == 0:
-                mdm.append(0.0)
-            else:
-                up_move = self.highs[i] - self.highs[i - 1]
-                down_move = self.lows[i - 1] - self.lows[i]
-                mdm.append(max(down_move, 0) if down_move > up_move else 0.0)
-        return mdm
-
-    def _smooth(self, data: list[float], period: int) -> list[float]:
-        """Wilder's smoothing"""
-        result = []
-        s = 0.0
-        for i, v in enumerate(data):
-            if i == 0:
-                s = v
-            else:
-                s = s - s / period + v
-            result.append(s)
-        return result
+            indicators[i].hv20 = hv20[i]
+            indicators[i].hv60 = hv60[i]
+            indicators[i].max_drawdown = md[i]
+            indicators[i].sharpe = sharpe[i]
+            indicators[i].sortino = sortino[i]
+            indicators[i].calmar = calmar[i]
+            indicators[i].skewness = skew[i]
+            indicators[i].kurtosis = kurt[i]
 
 
 # ===========================================================================
 # 批量处理与保存
 # ===========================================================================
 
-def compute_and_save_factors(stock_name: str, api_name: str = "tencent", 
-                             db_path: Optional[str] = None, 
+def compute_and_save_factors(stock_name: str, api_name: str = "tencent",
+                             db_path: Optional[str] = None,
                              limit: int = 5000,
                              force_refresh: bool = False) -> bool:
-    """
-    计算并保存指定股票的所有因子到数据库
-    
-    :param stock_name: 股票名称 (如 "Tencent")
-    :param api_name: API数据源 (如 "tencent")
-    :param db_path: 数据库路径 (默认: database/stock_data.db)
-    :param limit: 获取K线数据的数量
-    :param force_refresh: 是否强制从API刷新数据（忽略缓存）
-    :return: 是否成功
-    """
-    
-    print(f"[FactorBatch] 开始处理股票: {stock_name}")
-    
-    # 1. 获取K线数据
-    print(f"[FactorBatch] 正在从 {api_name} 获取K线数据...")
-    raw_api = QuoteAPIFactory.create(api_name)
-    
+    """计算并保存指定股票的所有因子到数据库。"""
+
+    _log.info("开始处理股票: %s", stock_name)
+
+    # 1. 获取K线数据（Factory 内部已做单例缓存，重复调用不会创建新实例）
+    _log.info("正在从 %s 获取K线数据...", api_name)
     if force_refresh:
-        # 强制从API获取，不使用缓存
-        print(f"[FactorBatch] 强制刷新模式：直接从API获取")
+        _log.info("强制刷新模式：直接从API获取")
+        raw_api = QuoteAPIFactory.create(api_name)
         quotes = raw_api.get_klines(stock_name, limit=limit)
     else:
-        # 使用缓存
-        cached_api = CachedQuoteAPI(raw_api)
+        cached_api = QuoteAPIFactory.create_with_cache(api_name)
         quotes = cached_api.get_klines(stock_name, limit=limit)
     if not quotes:
-        print(f"[FactorBatch] 无法获取 {stock_name} 的K线数据")
+        _log.warning("无法获取 %s 的K线数据", stock_name)
         return False
-    
-    print(f"[FactorBatch] 获取到 {len(quotes)} 条K线数据")
-    
-    # 1.5 保存原始K线数据到数据库
-    print(f"[FactorBatch] 正在保存原始K线数据到数据库...")
-    from stock_info import KlineData
-    db_temp = StockDB(db_path)
-    db_temp.create_all_tables(stock_name)
-    saved_count = 0
-    for quote in quotes:
-        kline = KlineData()
-        kline.date = quote.date
-        kline.open = quote.open
-        kline.close = quote.close
-        kline.high = quote.high
-        kline.low = quote.low
-        kline.volume = quote.volume
-        kline.turnover = getattr(quote, 'turnover', 0.0)
-        kline.turnover_rate = 0.0
-        kline.pe = 0.0
-        try:
-            db_temp.write_kline_data(stock_name, kline)
-            saved_count += 1
-        except Exception as e:
-            pass  # 跳过已存在的数据
-    db_temp.close()
-    print(f"[FactorBatch] 保存原始K线数据: {saved_count} 条")
-    
-    # 2. 计算所有因子
-    print(f"[FactorBatch] 正在计算所有因子...")
+
+    _log.info("获取到 %d 条K线数据", len(quotes))
+
+    # 2. 因子计算 + 入库（同一个 DB 连接里完成所有写入）
+    _log.info("正在计算所有因子...")
     engine = FactorSeriesEngine(quotes)
     indicators = engine.compute_all()
-    print(f"[FactorBatch] 因子计算完成")
-    
-    # 3. 连接到数据库
-    db = StockDB(db_path)
-    db.create_all_tables(stock_name)
-    
-    # 4. 保存因子到数据库
-    print(f"[FactorBatch] 正在保存因子到数据库...")
-    
-    # 保存趋势因子
-    count_trend = 0
-    for ind in indicators:
-        if ind.date:
-            db.write_trend_data(stock_name, ind)
-            count_trend += 1
-    print(f"[FactorBatch] 保存趋势因子: {count_trend} 条")
-    
-    # 保存动量因子
-    count_momentum = 0
-    for ind in indicators:
-        if ind.date:
-            db.write_momentum_data(stock_name, ind)
-            count_momentum += 1
-    print(f"[FactorBatch] 保存动量因子: {count_momentum} 条")
-    
-    # 保存成交量因子
-    count_volume = 0
-    for ind in indicators:
-        if ind.date:
-            db.write_volume_data(stock_name, ind)
-            count_volume += 1
-    print(f"[FactorBatch] 保存成交量因子: {count_volume} 条")
-    
-    # 保存风险因子
-    count_risk = 0
-    for ind in indicators:
-        if ind.date:
-            db.write_risk_data(stock_name, ind)
-            count_risk += 1
-    print(f"[FactorBatch] 保存风险因子: {count_risk} 条")
-    
-    # 保存均线比率
-    count_ma = 0
-    for ind in indicators:
-        if ind.date:
-            db.write_ma_ratio_data(stock_name, ind)
-            count_ma += 1
-    print(f"[FactorBatch] 保存均线比率: {count_ma} 条")
-    
-    # 5. 关闭数据库
-    db.close()
-    
-    print(f"[FactorBatch] [OK] 完成! 股票 {stock_name} 的所有因子已保存到数据库")
+    _log.info("因子计算完成")
+
+    valid_inds = [ind for ind in indicators if ind.date]
+    with closing(StockDB(db_path)) as db:
+        try:
+            db.write_kline_data_many(stock_name, quotes)
+            _log.info("保存原始K线数据: %d 条", len(quotes))
+        except Exception as e:
+            _log.error("保存原始K线数据失败: %s", e)
+
+        _log.info("正在批量保存 6 张因子表...")
+        db.write_all_indicators_many(stock_name, valid_inds)
+        _log.info("批量保存完成: %d 条 × 6 张因子表", len(valid_inds))
+
+    _log.info("[OK] 完成! 股票 %s 的所有因子已保存到数据库", stock_name)
     return True
 
 
-def batch_process_all_stocks(api_name: str = "tencent", db_path: Optional[str] = None):
-    """
-    批量处理所有股票
-    
-    :param api_name: API数据源
-    :param db_path: 数据库路径
-    """
+def batch_process_all_stocks(api_name: str = "tencent",
+                             db_path: Optional[str] = None):
+    """批量处理 config.global_stock_list 中所有股票。"""
     import config
-    
-    print(f"[FactorBatch] 开始批量处理所有股票...")
-    
-    for name_key, stock_info in config.global_stock_list.items():
-        print(f"\n{'='*70}")
-        print(f"处理: {stock_info.name} ({name_key})")
-        print(f"{'='*70}")
-        
-        success = compute_and_save_factors(name_key, api_name, db_path)
-        if success:
-            print(f"[OK] {name_key} 处理成功")
-        else:
-            print(f"[ERROR] {name_key} 处理失败")
-    
-    print(f"\n[FactorBatch] 批量处理完成!")
+
+    _log.info("开始批量处理所有股票...")
+    try:
+        for name_key, stock_info in config.global_stock_list.items():
+            _log.info("=" * 70)
+            _log.info("处理: %s (%s)", stock_info.name, name_key)
+            _log.info("=" * 70)
+            success = compute_and_save_factors(name_key, api_name, db_path)
+            _log.info("[%s] %s 处理%s",
+                      "OK" if success else "ERROR",
+                      name_key,
+                      "成功" if success else "失败")
+        _log.info("批量处理完成!")
+    finally:
+        # 释放 Factory 中缓存的 CachedQuoteAPI（关闭 DB 连接）
+        QuoteAPIFactory.clear_cache()
 
 
 # ===========================================================================
@@ -651,19 +349,20 @@ def batch_process_all_stocks(api_name: str = "tencent", db_path: Optional[str] =
 
 def main():
     parser = argparse.ArgumentParser(description="批量计算并保存因子到数据库")
-    parser.add_argument("--stock", help="指定股票名称 (如 Tencent)，不指定则处理所有股票")
+    parser.add_argument("--stock", help="指定股票名称 (如 Tencent)，不指定则处理所有")
     parser.add_argument("--api", default="tencent", help="API数据源 (default: tencent)")
-    parser.add_argument("--limit", type=int, default=5000, help="K线数据数量 (default: 5000)")
+    parser.add_argument("--limit", type=int, default=5000, help="K线数据数量")
     parser.add_argument("--db", help="数据库路径 (默认: database/stock_data.db)")
-    parser.add_argument("--force-refresh", action="store_true", help="强制从API刷新数据（忽略缓存）")
+    parser.add_argument("--force-refresh", action="store_true",
+                        help="强制从API刷新数据（忽略缓存）")
     args = parser.parse_args()
-    
+
     if args.stock:
-        # 处理单个股票
-        success = compute_and_save_factors(args.stock, args.api, args.db, args.limit, args.force_refresh)
-        sys.exit(0 if success else 1)
+        ok = compute_and_save_factors(args.stock, args.api, args.db,
+                                      args.limit, args.force_refresh)
+        QuoteAPIFactory.clear_cache()
+        sys.exit(0 if ok else 1)
     else:
-        # 处理所有股票
         batch_process_all_stocks(args.api, args.db)
 
 

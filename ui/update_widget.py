@@ -1,6 +1,6 @@
 
 import config
-import trader_utils
+from utils import stock_updater
 from PySide6.QtWidgets import QWidget
 
 from ui.designer.gen.update_widget_generated import Ui_UpdateModule
@@ -26,8 +26,8 @@ class UpdateModuleWidget(QWidget):
 
     def on_update_all_clicked(self):
         print("update all clicked")
-        trader_utils.update_all_stocks()
+        stock_updater.update_all_stocks()
 
     def on_update_clicked(self):
-        print("update clicked, {self.stockKeyList[self.updateSockIndex]}")
-        trader_utils.update_stocket(self.stock_keys[self.updateSockIndex])
+        print(f"update clicked, {self.stock_keys[self.updateSockIndex]}")
+        stock_updater.update_stocket(self.stock_keys[self.updateSockIndex])

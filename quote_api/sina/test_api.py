@@ -22,15 +22,15 @@ from quote_api.sina import SinaQuoteAPI  # noqa: E402
 
 
 SOURCE_NAME = "sina"
-# 新浪财经只能稳定提供 A 股 K 线；港股仅有实时快照，没有历史 K 线接口。
-# 自测默认用 A 股 SilverETF，能同时验证实时快照和 K 线两条链路。
-DEFAULT_STOCK = "SilverETF"
+# 新浪财经港股仅有实时快照，没有历史 K 线接口；
+# 自测默认用 Tencent，验证实时快照链路（K 线在港股本就为空，会判为 FAIL，属预期）。
+DEFAULT_STOCK = "Tencent"
 
 
 def run_self_test(name: Optional[str] = None) -> bool:
     """统一自测入口
 
-    :param name: config.global_stock_list 中的股票键，默认 "SilverETF"
+    :param name: STOCK_META 中的股票键，默认 "Tencent"
     :return: 通过返回 True
     """
     name = name or DEFAULT_STOCK

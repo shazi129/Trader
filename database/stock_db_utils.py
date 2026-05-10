@@ -21,7 +21,12 @@ import os
 import sqlite3
 from typing import List, Optional
 
-from stock_info import DataValue, KlineData, KlineIndicator
+from quote_api.quote_base import DailyQuote
+from quantitative.factor_data import KlineIndicator
+from utils.data_types import DataValue
+from utils.logger import get_logger
+
+_log = get_logger(__name__)
 
 
 class StockDB:
@@ -167,7 +172,7 @@ class StockDB:
         else:
             self._db_file = db_path
 
-        print("open db:" + self._db_file)
+        _log.debug("open db: %s", self._db_file)
         self._connection = sqlite3.connect(self._db_file)
         self._cursor = self._connection.cursor()
 
@@ -198,9 +203,9 @@ class StockDB:
                 self._connection.close()
                 self._connection = None
                 self._cursor = None
-                print("close db:" + self._db_file)
+                _log.debug("close db: %s", self._db_file)
         except Exception as e:
-            print("close db error: %s" % e)
+            _log.warning("close db error: %s", e)
 
     def __del__(self):
         try:
@@ -221,18 +226,47 @@ class StockDB:
                 # 同时删除对应的 date 索引（表删了索引也会自动删，但保险起见）
                 self._cursor.execute(f"DROP INDEX IF EXISTS idx_{table}_date")
             except sqlite3.Error as e:
-                print(f"drop table {table} error: {e}")
+                _log.warning("drop table %s error: %s", table, e)
         self._connection.commit()
 
     def _ensure_schema(self):
-        """创建所有长表与索引（IF NOT EXISTS）"""
+        """创建所有长表与索引（IF NOT EXISTS）。
+
+        若长表已存在但缺少新增列，会自动 ``ALTER TABLE ADD COLUMN`` 补齐，
+        以便代码升级后无需手动迁移历史 DB。
+        """
         for table, cols in self._TABLE_SCHEMA.items():
             self._create_long_table(table, cols)
+            self._migrate_add_missing_columns(table, cols)
             # 横截面查询索引（按日期定位全市场）
             self._cursor.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{table}_date ON {table}(Date)"
             )
         self._connection.commit()
+
+    def _migrate_add_missing_columns(self, table_name: str, columns: dict):
+        """对已存在的表，比较实际列与 schema，缺什么补什么（ALTER TABLE ADD COLUMN）。"""
+        try:
+            self._cursor.execute(f"PRAGMA table_info({table_name})")
+            existing = {row[1] for row in self._cursor.fetchall()}
+        except sqlite3.Error as e:
+            _log.warning("read table_info(%s) error: %s", table_name, e)
+            return
+        if not existing:
+            return  # 表刚被 CREATE，列肯定齐
+        for col, decl in columns.items():
+            if col in existing:
+                continue
+            # SQLite 的 ADD COLUMN 不允许带 PRIMARY KEY / NOT NULL without default 等约束，
+            # 所以这里把声明里的非空约束去掉，仅保留类型部分。
+            type_only = decl.split()[0]
+            try:
+                self._cursor.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN {col} {type_only}"
+                )
+                _log.info("migrate: add column %s.%s %s", table_name, col, type_only)
+            except sqlite3.Error as e:
+                _log.warning("ALTER TABLE %s ADD %s error: %s", table_name, col, e)
 
     def _create_long_table(self, table_name: str, columns: dict):
         cols_sql = ", ".join(f"{k} {v}" for k, v in columns.items())
@@ -260,7 +294,7 @@ class StockDB:
             self._cursor.execute(sql, values)
             self._connection.commit()
         except sqlite3.Error as e:
-            print(f"[StockDB] upsert error on {table_name}: {e}")
+            _log.error("upsert error on %s: %s", table_name, e)
 
     def _upsert_many(self, table_name: str, rows: List[dict]):
         """批量 INSERT OR REPLACE，相同列结构"""
@@ -275,7 +309,7 @@ class StockDB:
             self._cursor.executemany(sql, values)
             self._connection.commit()
         except sqlite3.Error as e:
-            print(f"[StockDB] upsert_many error on {table_name}: {e}")
+            _log.error("upsert_many error on %s: %s", table_name, e)
 
     # ============================================================
     # 基础查询
@@ -291,7 +325,7 @@ class StockDB:
             row = self._cursor.fetchone()
             return row[0] if row and row[0] else None
         except sqlite3.Error as e:
-            print("get_latest_date error: ", e)
+            _log.warning("get_latest_date error: %s", e)
             return None
 
     def get_row_count(self, name: str, table_name: str = None) -> int:
@@ -304,7 +338,7 @@ class StockDB:
             row = self._cursor.fetchone()
             return row[0] if row else 0
         except sqlite3.Error as e:
-            print("get_row_count error: ", e)
+            _log.warning("get_row_count error: %s", e)
             return 0
 
     def list_symbols(self, table_name: str = None) -> List[str]:
@@ -317,65 +351,85 @@ class StockDB:
             )
             return [row[0] for row in self._cursor.fetchall()]
         except sqlite3.Error as e:
-            print("list_symbols error: ", e)
+            _log.warning("list_symbols error: %s", e)
             return []
 
     # ============================================================
     # K线表操作
     # ============================================================
 
-    def parse_kline(self, kline: KlineData) -> dict:
+    def parse_kline(self, quote: DailyQuote) -> dict:
+        """DailyQuote -> kline_daily 行 dict（带 4 位小数舍入）。
+
+        ``TurnoverRate`` 在数据源未提供时回落到 0.0。
+        ``pre_close`` 不入库——前复权序列下 ``pre_close = 上一行 close``，
+        属可派生字段，分析层按需现算即可。
+        """
         data = {
-            "Date": kline.date,
-            "Open": kline.open,
-            "Close": kline.close,
-            "High": kline.high,
-            "Low": kline.low,
-            "Volume": kline.volume,
-            "Turnover": kline.turnover,
-            "TurnoverRate": kline.turnover_rate,
+            "Date": quote.date,
+            "Open": quote.open,
+            "Close": quote.close,
+            "High": quote.high,
+            "Low": quote.low,
+            "Volume": quote.volume,
+            "Turnover": quote.turnover,
+            "TurnoverRate": getattr(quote, "turnover_rate", 0.0),
         }
         return self._round_kline(data)
 
-    def write_kline_data(self, name: str, kline: KlineData):
+    def write_kline_data(self, name: str, quote: DailyQuote):
         """写入一条K线数据（带 Symbol）"""
-        data = self.parse_kline(kline)
+        data = self.parse_kline(quote)
         data["Symbol"] = name
         self._upsert(self.TABLE_KLINE, data)
 
-    def write_kline_data_many(self, name: str, klines: List[KlineData]):
+    def write_kline_data_many(self, name: str, quotes: List[DailyQuote]):
         """批量写入K线"""
         rows = []
-        for k in klines:
-            r = self.parse_kline(k)
+        for q in quotes:
+            r = self.parse_kline(q)
             r["Symbol"] = name
             rows.append(r)
         self._upsert_many(self.TABLE_KLINE, rows)
 
-    def get_latest_klines(self, name: str, size: int) -> List[KlineData]:
-        """获取最新的 N 条K线（按日期降序，再 parse 为 KlineData）"""
+    # 统一一次 SELECT 列序，便于多个查询接口复用 _row_to_quote
+    _KLINE_SELECT_COLS = (
+        "Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate"
+    )
+
+    def _row_to_quote(self, row: tuple, source: str = "db") -> DailyQuote:
+        """把 SELECT(_KLINE_SELECT_COLS) 行解码为 DailyQuote。"""
+        q = DailyQuote()
+        q.date = str(row[0])
+        q.open = float(row[1]) if row[1] is not None else 0.0
+        q.close = float(row[2]) if row[2] is not None else 0.0
+        q.high = float(row[3]) if row[3] is not None else 0.0
+        q.low = float(row[4]) if row[4] is not None else 0.0
+        q.volume = float(row[5]) if row[5] is not None else 0.0
+        q.turnover = float(row[6]) if row[6] is not None else 0.0
+        q.turnover_rate = float(row[7]) if len(row) > 7 and row[7] is not None else 0.0
+        q.source = source
+        return q
+
+    def get_latest_klines(self, name: str, size: int) -> List[DailyQuote]:
+        """获取最新的 N 条K线（按日期降序，返回 DailyQuote 列表）"""
         sql = (
-            "SELECT Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate "
+            f"SELECT {self._KLINE_SELECT_COLS} "
             f"FROM {self.TABLE_KLINE} WHERE Symbol=? ORDER BY Date DESC LIMIT ?"
         )
         try:
             self._cursor.execute(sql, (name, size))
-            result = []
-            for row in self._cursor.fetchall():
-                kline = KlineData()
-                if kline.parse(tuple(row)):
-                    result.append(kline)
-            return result
+            return [self._row_to_quote(row) for row in self._cursor.fetchall()]
         except sqlite3.Error as e:
-            print("get_latest_klines error: ", e)
+            _log.warning("get_latest_klines error: %s", e)
             return []
 
     def get_klines_in_range(
         self, name: str, start_date: str = None, end_date: str = None
-    ) -> List[KlineData]:
+    ) -> List[DailyQuote]:
         """按日期区间取K线（升序）"""
         sql = (
-            "SELECT Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate "
+            f"SELECT {self._KLINE_SELECT_COLS} "
             f"FROM {self.TABLE_KLINE} WHERE Symbol=?"
         )
         params: list = [name]
@@ -388,97 +442,139 @@ class StockDB:
         sql += " ORDER BY Date ASC"
         try:
             self._cursor.execute(sql, params)
-            result = []
-            for row in self._cursor.fetchall():
-                kline = KlineData()
-                if kline.parse(tuple(row)):
-                    result.append(kline)
-            return result
+            return [self._row_to_quote(row) for row in self._cursor.fetchall()]
         except sqlite3.Error as e:
-            print("get_klines_in_range error: ", e)
+            _log.warning("get_klines_in_range error: %s", e)
             return []
 
+    def get_daily_quote_by_date(self, name: str, date: str) -> Optional[DailyQuote]:
+        """按 (Symbol, Date) 取单条 K 线"""
+        sql = (
+            f"SELECT {self._KLINE_SELECT_COLS} "
+            f"FROM {self.TABLE_KLINE} WHERE Symbol=? AND Date=? LIMIT 1"
+        )
+        try:
+            self._cursor.execute(sql, (name, date))
+            row = self._cursor.fetchone()
+            return self._row_to_quote(row) if row else None
+        except sqlite3.Error as e:
+            _log.warning("get_daily_quote_by_date error: %s", e)
+            return None
+
+
     # ============================================================
-    # 因子表 - parse 函数（与旧版一致）
+    # 因子表 - 元数据驱动的 parse / 写入
     # ============================================================
+    #
+    # `_FACTOR_FIELD_MAP` 把每张因子表的 (列名 -> KlineIndicator 属性名)
+    # 集中在一处，消掉之前 6 套 parse_xxx + 6 套 write_xxx_data 的样板代码。
+    # 新增因子时只需在这里加一行，无需再改 parse/write 函数。
+    # ============================================================
+
+    _FACTOR_FIELD_MAP = {
+        "TABLE_INDICATOR": [
+            ("MA5", "ma5"), ("MA10", "ma10"), ("MA20", "ma20"),
+            ("MA30", "ma30"), ("MA60", "ma60"),
+            ("MA120", "ma120"), ("MA250", "ma250"),
+            ("BollUp", "boll_up"), ("BollLow", "boll_low"),
+            ("K", "k"), ("D", "d"), ("J", "j"),
+            ("Dif", "dif"), ("Dea", "dea"), ("MACD", "macd"),
+            ("RSI1", "rsi1"), ("RSI2", "rsi2"), ("RSI3", "rsi3"),
+            ("ADOSC", "adosc"),
+        ],
+        "TABLE_TREND": [
+            ("EMA12", "ema12"), ("EMA26", "ema26"), ("EMA50", "ema50"),
+            ("MACD_HIST", "macd_hist"),
+            ("ADX", "adx"), ("Plus_DI", "plus_di"), ("Minus_DI", "minus_di"),
+            ("TR", "tr"), ("ATR", "atr"), ("ATR_PCT", "atr_pct"),
+        ],
+        "TABLE_MOMENTUM": [
+            ("MOM1W", "mom1w"), ("MOM2W", "mom2w"), ("MOM1M", "mom1m"),
+            ("MOM3M", "mom3m"), ("MOM6M", "mom6m"),
+            ("MOM9M", "mom9m"), ("MOM12M", "mom12m"),
+            ("ROC1W", "roc1w"), ("ROC2W", "roc2w"), ("ROC1M", "roc1m"),
+            ("ROC3M", "roc3m"), ("ROC6M", "roc6m"),
+            ("ROC9M", "roc9m"), ("ROC12M", "roc12m"),
+            ("CCI", "cci"), ("WilliamsR", "williams_r"),
+        ],
+        "TABLE_VOLUME": [
+            ("OBV", "obv"), ("VPT", "vpt"), ("ADL", "adl"),
+            ("MFI", "mfi"),
+            ("ForceIndex1", "force_index1"),
+            ("ForceIndex13", "force_index13"),
+            ("ForceIndex21", "force_index21"),
+        ],
+        "TABLE_RISK": [
+            ("HV20", "hv20"), ("HV60", "hv60"),
+            ("MaxDrawdown", "max_drawdown"), ("Volatility", "volatility"),
+            ("Sharpe", "sharpe"), ("Sortino", "sortino"), ("Calmar", "calmar"),
+            ("Skewness", "skewness"), ("Kurtosis", "kurtosis"),
+        ],
+        "TABLE_MA_RATIO": [
+            ("MA_Ratio_5", "ma_ratio_5"), ("MA_Ratio_10", "ma_ratio_10"),
+            ("MA_Ratio_20", "ma_ratio_20"), ("MA_Ratio_60", "ma_ratio_60"),
+            ("MA_Ratio_200", "ma_ratio_200"), ("MA200", "ma200"),
+            ("MA30W", "ma30w"), ("MA75W", "ma75w"),
+            ("MA_Ratio_30W_75W", "ma_ratio_30w_75w"),
+            ("MA_Ratio_5W_30W", "ma_ratio_5w_30w"),
+        ],
+    }
+
+    def _factor_table_specs(self) -> List[tuple]:
+        """返回 [(table_name, field_pairs), ...]，供批量遍历使用"""
+        return [
+            (getattr(self, key), pairs)
+            for key, pairs in self._FACTOR_FIELD_MAP.items()
+        ]
+
+    def _indicator_to_row(self, indicator: KlineIndicator,
+                          field_pairs: list) -> dict:
+        """通用：根据字段映射把 KlineIndicator 转成一行 dict"""
+        data = {"Date": indicator.date}
+        for col, attr in field_pairs:
+            data[col] = getattr(indicator, attr, None)
+        return self._round_factor(data)
+
+    # ---------- 公开 parse_xxx（保留旧接口，委托到通用实现）----------
 
     def parse_indicator(self, indicator: KlineIndicator) -> dict:
-        data = {
-            "Date": indicator.date,
-            "MA5": indicator.ma5, "MA10": indicator.ma10, "MA20": indicator.ma20,
-            "MA30": indicator.ma30, "MA60": indicator.ma60,
-            "MA120": indicator.ma120, "MA250": indicator.ma250,
-            "BollUp": indicator.boll_up, "BollLow": indicator.boll_low,
-            "K": indicator.k, "D": indicator.d, "J": indicator.j,
-            "Dif": indicator.dif, "Dea": indicator.dea, "MACD": indicator.macd,
-            "RSI1": indicator.rsi1, "RSI2": indicator.rsi2, "RSI3": indicator.rsi3,
-            "ADOSC": indicator.adosc,
-        }
-        return self._round_factor(data)
+        return self._indicator_to_row(indicator, self._FACTOR_FIELD_MAP["TABLE_INDICATOR"])
 
     def parse_trend(self, indicator: KlineIndicator) -> dict:
-        data = {
-            "Date": indicator.date,
-            "EMA12": indicator.ema12, "EMA26": indicator.ema26, "EMA50": indicator.ema50,
-            "MACD_HIST": indicator.macd_hist,
-            "ADX": indicator.adx, "Plus_DI": indicator.plus_di, "Minus_DI": indicator.minus_di,
-            "TR": indicator.tr, "ATR": indicator.atr, "ATR_PCT": indicator.atr_pct,
-        }
-        return self._round_factor(data)
+        return self._indicator_to_row(indicator, self._FACTOR_FIELD_MAP["TABLE_TREND"])
 
     def parse_momentum(self, indicator: KlineIndicator) -> dict:
-        data = {
-            "Date": indicator.date,
-            "MOM1W": indicator.mom1w, "MOM2W": indicator.mom2w, "MOM1M": indicator.mom1m,
-            "MOM3M": indicator.mom3m, "MOM6M": indicator.mom6m,
-            "MOM9M": indicator.mom9m, "MOM12M": indicator.mom12m,
-            "ROC1W": indicator.roc1w, "ROC2W": indicator.roc2w, "ROC1M": indicator.roc1m,
-            "ROC3M": indicator.roc3m, "ROC6M": indicator.roc6m,
-            "ROC9M": indicator.roc9m, "ROC12M": indicator.roc12m,
-            "CCI": indicator.cci, "WilliamsR": indicator.williams_r,
-        }
-        return self._round_factor(data)
+        return self._indicator_to_row(indicator, self._FACTOR_FIELD_MAP["TABLE_MOMENTUM"])
 
     def parse_volume(self, indicator: KlineIndicator) -> dict:
-        data = {
-            "Date": indicator.date,
-            "OBV": indicator.obv, "VPT": indicator.vpt, "ADL": indicator.adl,
-            "MFI": indicator.mfi,
-            "ForceIndex1": indicator.force_index1,
-            "ForceIndex13": indicator.force_index13,
-            "ForceIndex21": indicator.force_index21,
-        }
-        return self._round_factor(data)
+        return self._indicator_to_row(indicator, self._FACTOR_FIELD_MAP["TABLE_VOLUME"])
 
     def parse_risk(self, indicator: KlineIndicator) -> dict:
-        data = {
-            "Date": indicator.date,
-            "HV20": indicator.hv20, "HV60": indicator.hv60,
-            "MaxDrawdown": indicator.max_drawdown, "Volatility": indicator.volatility,
-            "Sharpe": indicator.sharpe, "Sortino": indicator.sortino, "Calmar": indicator.calmar,
-            "Skewness": indicator.skewness, "Kurtosis": indicator.kurtosis,
-        }
-        return self._round_factor(data)
+        return self._indicator_to_row(indicator, self._FACTOR_FIELD_MAP["TABLE_RISK"])
 
     def parse_ma_ratio(self, indicator: KlineIndicator) -> dict:
-        data = {
-            "Date": indicator.date,
-            "MA_Ratio_5": indicator.ma_ratio_5, "MA_Ratio_10": indicator.ma_ratio_10,
-            "MA_Ratio_20": indicator.ma_ratio_20, "MA_Ratio_60": indicator.ma_ratio_60,
-            "MA_Ratio_200": indicator.ma_ratio_200, "MA200": indicator.ma200,
-            "MA30W": indicator.ma30w, "MA75W": indicator.ma75w,
-            "MA_Ratio_30W_75W": indicator.ma_ratio_30w_75w,
-            "MA_Ratio_5W_30W": indicator.ma_ratio_5w_30w,
-        }
-        return self._round_factor(data)
+        return self._indicator_to_row(indicator, self._FACTOR_FIELD_MAP["TABLE_MA_RATIO"])
 
     # ============================================================
-    # 因子表 - 写入函数
+    # 因子表 - 写入函数（单条 / 批量）
     # ============================================================
 
     def _write_factor(self, table: str, name: str, parsed: dict):
         parsed["Symbol"] = name
         self._upsert(table, parsed)
+
+    def _write_factor_many(self, table: str, name: str,
+                           indicators: List[KlineIndicator],
+                           field_pairs: list):
+        """批量写一张因子表（一次事务）"""
+        rows = []
+        for ind in indicators:
+            if not ind.date:
+                continue
+            row = self._indicator_to_row(ind, field_pairs)
+            row["Symbol"] = name
+            rows.append(row)
+        self._upsert_many(table, rows)
 
     def write_indicator_data(self, name: str, indicator: KlineIndicator):
         self._write_factor(self.TABLE_INDICATOR, name, self.parse_indicator(indicator))
@@ -499,13 +595,17 @@ class StockDB:
         self._write_factor(self.TABLE_MA_RATIO, name, self.parse_ma_ratio(indicator))
 
     def write_all_indicators(self, name: str, indicator: KlineIndicator):
-        """一次性写入所有因子（同 K 线一起调用更高效）"""
-        self.write_indicator_data(name, indicator)
-        self.write_trend_data(name, indicator)
-        self.write_momentum_data(name, indicator)
-        self.write_volume_data(name, indicator)
-        self.write_risk_data(name, indicator)
-        self.write_ma_ratio_data(name, indicator)
+        """一次性写入所有因子表（单条版，保留旧接口）。"""
+        for table, pairs in self._factor_table_specs():
+            row = self._indicator_to_row(indicator, pairs)
+            row["Symbol"] = name
+            self._upsert(table, row)
+
+    def write_all_indicators_many(self, name: str,
+                                  indicators: List[KlineIndicator]):
+        """批量写入所有因子表（推荐：每张表一次 executemany + commit）。"""
+        for table, pairs in self._factor_table_specs():
+            self._write_factor_many(table, name, indicators, pairs)
 
     # ============================================================
     # 兼容旧 API（让上层代码不用改）
@@ -554,7 +654,7 @@ class StockDB:
             self._cursor.execute(sql, (denominator_key, numerator_key))
             return [DataValue(str(row[0]), row[1]) for row in self._cursor.fetchall()]
         except sqlite3.Error as e:
-            print("get_stock_ratio_data error: ", e)
+            _log.warning("get_stock_ratio_data error: %s", e)
             return []
 
     # ============================================================
@@ -580,5 +680,5 @@ class StockDB:
             self._cursor.execute(sql, (date, top_n))
             return self._cursor.fetchall()
         except sqlite3.Error as e:
-            print("cross_section_rank error: ", e)
+            _log.warning("cross_section_rank error: %s", e)
             return []

@@ -84,8 +84,8 @@ def test_cached_api():
         print("   [X] 获取失败\n")
     
     # 7. 测试不同股票
-    print("7. 测试其他股票 (SSE_Index)...")
-    quotes3 = cached_api.get_klines("SSE_Index", limit=50)
+    print("7. 测试其他股票 (Alibaba)...")
+    quotes3 = cached_api.get_klines("Alibaba", limit=50)
     if quotes3:
         print(f"   [OK] 成功获取 {len(quotes3)} 条数据\n")
     else:

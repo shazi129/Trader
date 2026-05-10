@@ -1,0 +1,13 @@
+{
+    "api": "eastmoney",
+    "db_path": null,
+    "earliest_date": "2026-05-01",
+    "schedule_time": "17:30",
+    "stocks": [
+        {
+            "name_key": "Tencent",
+            "earliest_date": null,
+            "enabled": true
+        }
+    ]
+}

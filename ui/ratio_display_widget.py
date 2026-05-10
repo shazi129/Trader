@@ -1,6 +1,6 @@
 
 import config
-import trader_utils
+from utils.ratio import get_ratio_data
 from PySide6.QtWidgets import QWidget
 
 from ui.designer.gen.ratio_display_wdiget_generated import Ui_ratioDisplayWidget
@@ -39,6 +39,6 @@ class RatioDisplayWidget(QWidget):
             print("分子分母不能相同")
             return
         print(f"show ratio clicked, {self.stock_keys[self.numerator_index]}, {self.stock_keys[self.denominator_index]}")
-        ratio_data = trader_utils.get_ratio_data(self.stock_keys[self.numerator_index], self.stock_keys[self.denominator_index])
+        ratio_data = get_ratio_data(self.stock_keys[self.numerator_index], self.stock_keys[self.denominator_index])
 
         EventSystem.get_instance().notify_listeners(config.EventID.SHOW_DATA, ratio_data)

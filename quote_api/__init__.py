@@ -19,15 +19,32 @@
     quotes = api.get_klines("Tencent", limit=500)  # 自动缓存
 """
 
-from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike
+from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, StockFundamental
 from quote_api.quote_factory import QuoteAPIFactory, QuoteSource
 from quote_api.cached_api import CachedQuoteAPI
+from quote_api.stock_meta import (
+    STOCK_META,
+    StockInfo,
+    StockMarket,
+    get_meta,
+    all_keys,
+    register,
+    has,
+)
 
 __all__ = [
     "DailyQuote",
+    "StockFundamental",
     "QuoteAPI",
     "DateLike",
     "QuoteAPIFactory",
     "QuoteSource",
     "CachedQuoteAPI",
+    "STOCK_META",
+    "StockInfo",
+    "StockMarket",
+    "get_meta",
+    "all_keys",
+    "register",
+    "has",
 ]

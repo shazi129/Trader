@@ -2,30 +2,25 @@
 #!/usr/bin/env python
 
 from enum import Enum
-from stock_info import StockInfo, StockMarket
 
-#行情数据源: "eastmoney" | "tencent" | "sina"
+# 股票元信息已下沉到 quote_api 包内统一管理；
+# 这里通过 re-export 保留 `config.global_stock_list` 旧接口，
+# 业务层无需修改。新增/调整股票请编辑 quote_api/stock_meta.py。
+from quote_api.stock_meta import STOCK_META as global_stock_list  # noqa: F401
+
+# 行情数据源: "eastmoney" | "tencent" | "sina"
 QUOTE_SOURCE: str = "eastmoney"
 
-#当前用到的股票信息配置
-global_stock_list: dict[str, StockInfo] = {
-    "Tencent": StockInfo('腾讯', '00700',  StockMarket.HK, "2004-06-16"),
-    "Tencent_14136": StockInfo('腾讯法兴六乙沽', '14136',  StockMarket.HK, "2025-02-25", True),
-    "Tencent_14210": StockInfo('腾讯花旗六乙沽', '14210',  StockMarket.HK, "2025-02-26", True),
-    "Alibaba": StockInfo('阿里-港', '09988', StockMarket.HK, "2019-11-26"),
-    "NVIDIA": StockInfo('英伟达', 'NVDA', StockMarket.NASDAQ, "1999-01-22"),
-    "COMEX_AG": StockInfo('Comex白银', 'SI00Y', StockMarket.COMEX, "2011-07-22"),
-    "SilverETF": StockInfo('白银基金', '518880', StockMarket.SH, "2015-08-12"),
-    "SSE_Index": StockInfo('上证指数', '000001', StockMarket.SH, "1990-12-19"),
-}
 
 def create_show_data():
     return {"date": [], "values": {}}
 
+
 def print_show_data(data):
     pass
 
-#全局事件id
+
+# 全局事件id
 class EventID(Enum):
     NONE        = 0
-    SHOW_DATA          = 1 
+    SHOW_DATA   = 1

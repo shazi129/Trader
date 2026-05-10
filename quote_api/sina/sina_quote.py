@@ -40,9 +40,9 @@ from typing import Optional
 
 import requests
 
-import config
-from stock_info import StockMarket
+from quote_api.stock_meta import StockMarket
 from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike
+from quote_api.stock_meta import get_meta
 
 
 class SinaQuoteAPI(QuoteAPI):
@@ -92,7 +92,7 @@ class SinaQuoteAPI(QuoteAPI):
         end_date: DateLike = None,
         limit: Optional[int] = None,
     ) -> list[DailyQuote]:
-        stock = config.global_stock_list.get(name)
+        stock = get_meta(name)
         if stock is None:
             print("[SinaQuoteAPI] unknown stock: %s" % name)
             return []
@@ -191,7 +191,7 @@ class SinaQuoteAPI(QuoteAPI):
 
     # ------------------------------------------------------------------
     def _fetch_realtime(self, name: str) -> Optional[DailyQuote]:
-        stock = config.global_stock_list.get(name)
+        stock = get_meta(name)
         if stock is None:
             return None
         symbol = self._sina_symbol(stock.market, stock.code, realtime=True)

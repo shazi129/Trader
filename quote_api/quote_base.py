@@ -8,8 +8,6 @@ import json
 from pathlib import Path
 from typing import Optional
 
-import config
-
 
 class DailyQuote:
     """单日行情快照（与数据源无关的统一模型）"""
@@ -25,6 +23,7 @@ class DailyQuote:
         self.pre_close: float = 0.0  # 昨收价（可选，部分接口提供）
         self.volume: float = 0.0     # 成交量（股/手，按源决定，实现内统一为"股"）
         self.turnover: float = 0.0   # 成交额（元）
+        self.turnover_rate: float = 0.0  # 换手率 %（部分数据源不提供时为 0）
         self.source: str = ""        # 数据来源标识
         self.change: float = 0.0     # 涨跌额（派生字段，可由上层计算后填入）
         self.change_pct: float = 0.0 # 涨跌幅 %（派生字段）
@@ -38,11 +37,11 @@ class DailyQuote:
         return (
             "DailyQuote(source=%s, name=%s, code=%s, date=%s, "
             "open=%.4f, close=%.4f, high=%.4f, low=%.4f, "
-            "pre_close=%.4f, volume=%.0f, turnover=%.2f)"
+            "pre_close=%.4f, volume=%.0f, turnover=%.2f, turnover_rate=%.4f)"
             % (
                 self.source, self.name, self.code, self.date,
                 self.open, self.close, self.high, self.low,
-                self.pre_close, self.volume, self.turnover,
+                self.pre_close, self.volume, self.turnover, self.turnover_rate,
             )
         )
 
@@ -152,23 +151,12 @@ class QuoteAPI:
 
     # ------------------------------------------------------------------
     def is_supported(self, name_key: str) -> bool:
-        """判断当前 API 是否支持指定的 name_key。"""
-        # 首先检查API自己的配置
-        if name_key in self._api_stocks:
-            return True
-        
-        # 然后检查全局配置，看该股票的market是否被当前API支持
-        stock = config.global_stock_list.get(name_key)
-        if stock is None:
-            return False
-        
-        # 检查当前API是否支持该市场
-        return self._supports_market(stock.market)
-    
-    def _supports_market(self, market: StockMarket) -> bool:
-        """检查当前API是否支持指定市场。子类可override。"""
-        # 默认：支持所有市场（子类应重写此方法）
-        return True
+        """判断当前 API 是否支持指定的 name_key。
+
+        以本数据源的 config.json（即 self._api_stocks）为权威清单。
+        子类如有更复杂规则，可自行 override。
+        """
+        return name_key in self._api_stocks
 
     def get_stock_code(self, name_key: str) -> Optional[str]:
         """获取 name_key 对应的 API 专属 stock_code；不支持则返回 None。"""

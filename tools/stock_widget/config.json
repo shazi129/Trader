@@ -15,11 +15,6 @@
             "name_key": "COMEX_AG",
             "name": "Comex白银",
             "show": false
-        },
-        {
-            "name_key": "SSE_Index",
-            "name": "上证指数",
-            "show": false
         }
     ],
     "refresh_interval": 60,

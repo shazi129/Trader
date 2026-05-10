@@ -19,7 +19,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from database.stock_db_utils import StockDB
-from stock_info import KlineData, KlineIndicator
+from quote_api.quote_base import DailyQuote
+from quantitative.factor_data import KlineIndicator
 
 
 # ============================================================
@@ -42,17 +43,18 @@ def db(db_path):
 
 def make_kline(date, open_price, close_price, high=None, low=None,
                 volume=1000000, turnover=100000000, turnover_rate=1.5):
-    """快速构造 KlineData 对象"""
-    k = KlineData()
-    k.date = date
-    k.open = open_price
-    k.close = close_price
-    k.high = high or close_price
-    k.low = low or open_price
-    k.volume = volume
-    k.turnover = turnover
-    k.turnover_rate = turnover_rate
-    return k
+    """快速构造一条日 K 线（统一使用 DailyQuote 模型）"""
+    q = DailyQuote()
+    q.date = date
+    q.open = open_price
+    q.close = close_price
+    q.high = high or close_price
+    q.low = low or open_price
+    q.volume = volume
+    q.turnover = turnover
+    # DailyQuote 没有原生 turnover_rate，但 StockDB.parse_kline 用 getattr 兜底取
+    q.turnover_rate = turnover_rate
+    return q
 
 
 def make_indicator(date="2026-05-09"):
@@ -485,17 +487,17 @@ class TestEdgeCases:
 
     def test_write_kline_none_values(self, db):
         """写入包含 None 的数据应不报错"""
-        k = KlineData()
-        k.date = "2026-05-09"
-        k.open = None
-        k.close = 100.0
-        k.high = None
-        k.low = None
-        k.volume = None
-        k.turnover = None
-        k.turnover_rate = None
+        q = DailyQuote()
+        q.date = "2026-05-09"
+        q.open = None
+        q.close = 100.0
+        q.high = None
+        q.low = None
+        q.volume = None
+        q.turnover = None
+        q.turnover_rate = None
         try:
-            db.write_kline_data("000001", k)
+            db.write_kline_data("000001", q)
         except Exception as e:
             pytest.fail(f"写入 None 值抛出异常: {e}")
 

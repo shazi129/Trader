@@ -8,9 +8,7 @@
 
 from __future__ import annotations
 
-import datetime
 from typing import Optional
-from pathlib import Path
 
 from quote_api.quote_base import (
     QuoteAPI,
@@ -18,16 +16,22 @@ from quote_api.quote_base import (
     StockFundamental,
     DateLike,
 )
+from utils.logger import get_logger
+
+_log = get_logger(__name__)
 
 
 class CachedQuoteAPI(QuoteAPI):
     """
     带数据库缓存的 API 包装器。
 
-    用法：
+    用法（推荐用 ``with``，确保 DB 连接被关闭）::
+
         raw_api = QuoteAPIFactory.create("eastmoney")
-        api = CachedQuoteAPI(raw_api)
-        klines = api.get_klines("Tencent", limit=500)  # 自动缓存
+        with CachedQuoteAPI(raw_api) as api:
+            klines = api.get_klines("Tencent", limit=500)
+
+    或显式调用 ``api.close()``。
     """
 
     def __init__(self, wrapped_api: QuoteAPI):
@@ -54,37 +58,30 @@ class CachedQuoteAPI(QuoteAPI):
         """日期转字符串"""
         return QuoteAPI.normalize_date(date)
 
-    def _convert_to_kline_data(self, quote: DailyQuote):
-        """DailyQuote -> KlineData"""
-        import sys
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-        from stock_info import KlineData
-        kline = KlineData()
-        kline.date = quote.date
-        kline.open = quote.open
-        kline.close = quote.close
-        kline.high = quote.high
-        kline.low = quote.low
-        kline.volume = quote.volume
-        kline.turnover = quote.turnover  # DailyQuote.turnover -> KlineData.turnover
-        kline.turnover_rate = 0.0  # DailyQuote 无此字段
-        kline.pe = 0.0
-        return kline
+    # ------------------------------------------------------------------
+    # 资源管理
+    # ------------------------------------------------------------------
 
-    def _convert_to_daily_quote(self, kline) -> DailyQuote:
-        """KlineData -> DailyQuote"""
-        from quote_api.quote_base import DailyQuote
-        quote = DailyQuote()
-        quote.date = kline.date
-        quote.open = kline.open
-        quote.close = kline.close
-        quote.high = kline.high
-        quote.low = kline.low
-        quote.volume = kline.volume
-        quote.turnover = kline.turnover  # KlineData.turnover -> DailyQuote.turnover
-        quote.source = self._wrapped.SOURCE
-        return quote
+    def close(self) -> None:
+        """关闭内部数据库连接（可重入：再次调用是 no-op）。"""
+        if self._db is not None:
+            try:
+                self._db.close()
+            except Exception as e:  # pragma: no cover - defensive
+                _log.warning("close cached db error: %s", e)
+            self._db = None
+
+    def __enter__(self) -> "CachedQuoteAPI":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self):  # 兜底
+        try:
+            self.close()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     # 重写：带缓存的 get_klines
@@ -97,59 +94,78 @@ class CachedQuoteAPI(QuoteAPI):
         end_date: DateLike = None,
         limit: Optional[int] = None,
     ) -> list[DailyQuote]:
-        """
-        获取 K 线（带数据库缓存）。
+        """获取 K 线（带数据库缓存）。
 
-        逻辑：
-        1. 检查数据库中是否已有足够数据
-        2. 如果已有，直接从 DB 返回
-        3. 如果缺失，调用真实 API 拉取
-        4. 拉取后存入 DB，再返回
+        策略（"按 [start, end] 区间，缺哪段补哪段"）：
+        1. 没有任何过滤条件且没传 limit  →  直接看 DB 是否有数据，没有就全量拉。
+        2. 指定了 start_date  →  比较 DB 已覆盖的最大日期，缺的尾段调上游补；
+                                  然后再用 get_klines_in_range 返回完整区间。
+        3. 只传 limit、不传日期  →  DB 取最近 N 条；不足则上游拉最新一段补齐。
+
+        关键修复 vs 旧版：
+        - 旧版只要 DB 里有 1 条就直接返回，**永远不补漏**。
+        - 旧版限额硬编码 1000，与 start/end 的语义割裂。
         """
         db = self._get_db()
+        sd = self._date_to_str(start_date)
+        ed = self._date_to_str(end_date)
+        wrapped_source = self._wrapped.SOURCE
 
-        # 确保表存在
-        db.create_all_tables(name)
+        # ---- 分支 A: 指定了起止日期（最常见路径）----
+        if sd is not None or ed is not None:
+            latest_in_db = db.get_latest_date(name)
 
-        # 获取请求范围
-        start_str = self._date_to_str(start_date)
-        end_str = self._date_to_str(end_date)
+            need_fetch_from: Optional[str] = None
+            if latest_in_db is None:
+                # DB 完全没数据，整段从 sd（或上游默认起点）拉
+                need_fetch_from = sd
+            elif ed is None or latest_in_db < ed:
+                # DB 有数据，但尾段不全
+                # 取 max(sd, latest_in_db+1) 作为补拉起点
+                from datetime import datetime, timedelta
+                next_day = (
+                    datetime.strptime(latest_in_db, "%Y-%m-%d") + timedelta(days=1)
+                ).strftime("%Y-%m-%d")
+                need_fetch_from = max(sd, next_day) if sd else next_day
 
-        # 查询数据库
-        print(f"[CachedAPI] 查询数据库: {name}, 范围: {start_str} ~ {end_str}")
-        db_data = db.get_latest_klines(name, limit or 1000)
+            if need_fetch_from is not None and (ed is None or need_fetch_from <= ed):
+                _log.info("%s: 补拉 %s ~ %s", name, need_fetch_from, ed or "latest")
+                fresh = self._wrapped.get_klines(name, start_date=need_fetch_from, end_date=ed)
+                if fresh:
+                    db.write_kline_data_many(name, fresh)
+                    _log.info("%s: 入库 %d 条", name, len(fresh))
 
-        if db_data and len(db_data) > 0:
-            # 有缓存数据，直接返回
-            print(f"[CachedAPI] 从数据库返回 {len(db_data)} 条数据")
-            result = [self._convert_to_daily_quote(k) for k in db_data]
-            result.sort(key=lambda x: x.date)
-
-            # 按日期范围过滤
-            if start_str:
-                result = [r for r in result if r.date >= start_str]
-            if end_str:
-                result = [r for r in result if r.date <= end_str]
+            # 从 DB 读完整区间，统一来源标识
+            result = db.get_klines_in_range(name, start_date=sd, end_date=ed)
+            for q in result:
+                q.source = wrapped_source
             if limit and len(result) > limit:
                 result = result[-limit:]
+            return result
 
-            if result:
-                return result
+        # ---- 分支 B: 没指定日期，按 limit 取最近 N 条 ----
+        size = limit if (limit and limit > 0) else 1000
+        cached = db.get_latest_klines(name, size)  # 已按 Date DESC
+        if len(cached) >= size:
+            cached.sort(key=lambda x: x.date)
+            for q in cached:
+                q.source = wrapped_source
+            return cached
 
-        # 数据库无数据，调用真实 API
-        print(f"[CachedAPI] 数据库无数据，调用 API: {self._wrapped.SOURCE}")
-        quotes = self._wrapped.get_klines(name, start_date, end_date, limit)
+        # DB 不够：拉上游补齐到最新
+        _log.info("%s: DB 现有 %d 条 < 需求 %d，调用上游补齐", name, len(cached), size)
+        # 简单策略：直接全量拉 size 条最新（上游侧不支持回溯型增量）
+        fresh = self._wrapped.get_klines(name, limit=size)
+        if fresh:
+            db.write_kline_data_many(name, fresh)
+            _log.info("%s: 入库 %d 条", name, len(fresh))
 
-        if not quotes:
-            return []
-
-        # 存入数据库
-        print(f"[CachedAPI] 存储 {len(quotes)} 条数据到数据库")
-        for q in quotes:
-            kline = self._convert_to_kline_data(q)
-            db.write_kline_data(name, kline)
-
-        return quotes
+        # 再从 DB 读最近 size 条，保证返回的是合并后的完整序列
+        result = db.get_latest_klines(name, size)
+        result.sort(key=lambda x: x.date)
+        for q in result:
+            q.source = wrapped_source
+        return result
 
     # ------------------------------------------------------------------
     # 重写：带缓存的 get_daily_quote
@@ -167,35 +183,18 @@ class CachedQuoteAPI(QuoteAPI):
 
         # 先查数据库
         db = self._get_db()
-        db.create_all_tables(name)
 
         if target:
-            # 查询指定日期（长表：按 Symbol+Date 过滤）
-            sql = (
-                "SELECT Date, Open, Close, High, Low, Volume, Turnover, TurnoverRate, PE "
-                f"FROM {db.TABLE_KLINE} WHERE Symbol=? AND Date=? LIMIT 1"
-            )
-            try:
-                db._cursor.execute(sql, (name, target))
-                row = db._cursor.fetchone()
-                if row:
-                    import sys
-                    from pathlib import Path
-                    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-                    from stock_info import KlineData
-                    kline = KlineData()
-                    if kline.parse(tuple(row)):
-                        print(f"[CachedAPI] 从数据库返回单日数据: {target}")
-                        return self._convert_to_daily_quote(kline)
-            except Exception as e:
-                print(f"[CachedAPI] 查询单日数据失败: {e}")
+            cached = db.get_daily_quote_by_date(name, target)
+            if cached:
+                cached.source = self._wrapped.SOURCE
+                _log.info("从数据库返回单日数据: %s", target)
+                return cached
 
         # 数据库没有，调用 API
         quote = self._wrapped.get_daily_quote(name, date)
         if quote:
-            # 存入数据库
-            kline = self._convert_to_kline_data(quote)
-            db.write_kline_data(name, kline)
+            db.write_kline_data(name, quote)
         return quote
 
     # ------------------------------------------------------------------

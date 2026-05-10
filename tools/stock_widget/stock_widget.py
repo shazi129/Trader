@@ -217,7 +217,7 @@ class FetchThread(QThread):
         # 币种按 global_stock_list 中的 market 推断
         try:
             import config as app_config
-            from stock_info import StockMarket
+            from quote_api import StockMarket
             info = app_config.global_stock_list.get(stock.name_key)
             if info is not None:
                 _market_currency = {

@@ -1,6 +1,14 @@
 # -*- coding: utf-8 -*-
 """东方财富：K 线 / 单日行情 / 基本面数据实现
 
+
+东方财富api
+https://so.eastmoney.com/web/s?keyword=00700
+https://push2.eastmoney.com/api/qt/stock/get?ut=6d2ffaa6a585d612eda28417681d58fb&fields=f57,f58,f59,f152,f43,f169,f170,f60,f44,f45,f168,f50,f47,f48,f49,f46,f78,f85,f86,f169,f117,f107,f111,f116,f117,f118,f163,f171,f113,f114,f115,f161,f162,f164,f168,f172,f177,f180,f181,f292,f751,f752&secid=116.00700&invt=2&_=1738833820289
+https://push2his.eastmoney.com/api/qt/stock/kline/get?fields1=f1,f2,f3,f4,f5,f6,f7,f8&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65&ut=fa5fd1943c7b386f172d6893dbfba10b&secid=116.00700&dect=1&klt=101&lmt=70&fqt=1&forcect=1&end=20500000&wbp2u=1849325530509956|0|1|0|web&cb=__jp0
+https://push2.eastmoney.com/api/qt/stock/trends2/get?fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13,f14,f17&fields2=f51,f52,f53,f54,f55,f58&dect=1&mpi=1000&ut=fa5fd1943c7b386f172d6893dbfba10b&secid=116.00700&ndays=1&iscr=0&iscca=0&wbp2u=1849325530509956|0|1|0|web&cb=miniquotechart_jp0
+
+
 接口：
 - 实时快照：https://push2.eastmoney.com/api/qt/stock/get
     返回 JSON，字段值均为整数（价格 * 1000，涨跌幅 * 100 等），需除以对应因子还原。
@@ -22,9 +30,9 @@ from typing import Optional
 
 import requests
 
-import config
-from stock_info import StockMarket
+from quote_api.stock_meta import StockMarket
 from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, StockFundamental
+from quote_api.stock_meta import get_meta
 
 
 class EastMoneyQuoteAPI(QuoteAPI):
@@ -55,7 +63,7 @@ class EastMoneyQuoteAPI(QuoteAPI):
 
     # ------------------------------------------------------------------
     def _get_secid(self, name: str) -> Optional[str]:
-        stock = config.global_stock_list.get(name)
+        stock = get_meta(name)
         if stock is None:
             return None
         match stock.market:
@@ -135,6 +143,13 @@ class EastMoneyQuoteAPI(QuoteAPI):
                 q.low = float(fields[4])
                 q.volume = float(fields[5])
                 q.turnover = float(fields[6])
+                # fields 顺序: 日期,开,收,高,低,成交量,成交额,振幅,涨跌幅,涨跌额,换手率
+                # 换手率 fields[10]，单位 %（与东财页面展示一致）
+                if len(fields) > 10:
+                    try:
+                        q.turnover_rate = float(fields[10])
+                    except (ValueError, TypeError):
+                        q.turnover_rate = 0.0
                 results.append(q)
             except Exception:
                 continue
@@ -293,7 +308,7 @@ class EastMoneyQuoteAPI(QuoteAPI):
             # 使用东方财富的财务摘要接口
             try:
                 # 通过股票代码获取财务数据
-                stock = config.global_stock_list.get(name)
+                stock = get_meta(name)
                 if stock:
                     # 构造请求获取财务摘要
                     fin_params = {

@@ -1,7 +1,7 @@
 import time
 import numpy as np
 import pyqtgraph as pg
-import trader_utils
+from utils.ratio import get_ratio_data
 
 class QTGraphWidget(pg.PlotWidget):
     # 定义尽量包含parent， 这样可以方便父子关系的联通
@@ -18,7 +18,7 @@ class QTGraphWidget(pg.PlotWidget):
         self.plotItem.getAxis('left').setLabel("日期", color='blue')
         self.plotItem.getAxis('bottom').setLabel("数值", color='blue')
 
-        datas = trader_utils.get_ratio_data("Tencent", "Tencent_27124")
+        datas = get_ratio_data("Tencent", "Alibaba")
         x = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         values = [item * item for item in x]
         self.cuv = pg.PlotCurveItem(pen=pg.mkPen(color='blue', width=4))
