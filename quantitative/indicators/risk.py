@@ -237,7 +237,8 @@ def historical_volatility_series(closes: Sequence[float], period: int,
         rets = []
         ok = True
         for j in range(i - period + 1, i + 1):
-            if closes[j - 1] <= 0:
+            # 两端都必须为正，否则 math.log 会抛 ValueError
+            if closes[j - 1] <= 0 or closes[j] <= 0:
                 ok = False
                 break
             rets.append(math.log(closes[j] / closes[j - 1]))

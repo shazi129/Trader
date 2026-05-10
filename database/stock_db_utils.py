@@ -608,6 +608,100 @@ class StockDB:
             self._write_factor_many(table, name, indicators, pairs)
 
     # ============================================================
+    # 因子表 - 读取（与写入对称的反向接口）
+    # ============================================================
+
+    def get_latest_indicator_date(self, name: str,
+                                   table_name: Optional[str] = None) -> Optional[str]:
+        """获取因子表中该股票的最新日期（默认查 TABLE_INDICATOR）。
+
+        kline_fetcher 用 ``get_latest_date()`` 判断 K 线增量起点；
+        本方法用于判断因子表是否已经"跟上" K 线最新日期：
+
+            if db.get_latest_indicator_date(name) == db.get_latest_date(name):
+                # 因子已是最新，直接读
+            else:
+                # 重算并写回
+
+        和 ``get_latest_date(name, table_name=...)`` 等价，单独命名只为
+        让调用方意图更明显。
+        """
+        return self.get_latest_date(
+            name, table_name or self.TABLE_INDICATOR
+        )
+
+    def _row_to_indicator(self, row: tuple, field_pairs: list,
+                          base: Optional["KlineIndicator"] = None) -> "KlineIndicator":
+        """把 ``SELECT Date, <columns...>`` 的一行解码成 KlineIndicator。
+
+        支持 ``base`` 复用：分析一只股票要把 6 张因子表合并到同一对象时，
+        第二张表起传入第一张已 fill 好的对象，按 (col, attr) 继续填字段。
+        """
+        ind = base if base is not None else KlineIndicator()
+        ind.date = str(row[0]) if row[0] is not None else ""
+        for i, (_, attr) in enumerate(field_pairs, start=1):
+            v = row[i]
+            if v is None:
+                continue
+            try:
+                setattr(ind, attr, float(v))
+            except (TypeError, ValueError):
+                setattr(ind, attr, v)
+        return ind
+
+    def _read_factor_table(self, table: str, name: str,
+                           field_pairs: list,
+                           start_date: Optional[str] = None,
+                           end_date: Optional[str] = None) -> List[tuple]:
+        """读一张因子表的 (Date, col1, col2, ...) 原始行，按日期升序。"""
+        cols = "Date," + ",".join(col for col, _ in field_pairs)
+        sql = f"SELECT {cols} FROM {table} WHERE Symbol=?"
+        params: list = [name]
+        if start_date:
+            sql += " AND Date>=?"
+            params.append(start_date)
+        if end_date:
+            sql += " AND Date<=?"
+            params.append(end_date)
+        sql += " ORDER BY Date ASC"
+        try:
+            self._cursor.execute(sql, params)
+            return list(self._cursor.fetchall())
+        except sqlite3.Error as e:
+            _log.warning("read factor table %s error: %s", table, e)
+            return []
+
+    def read_all_indicators_in_range(self, name: str,
+                                     start_date: Optional[str] = None,
+                                     end_date: Optional[str] = None
+                                     ) -> List["KlineIndicator"]:
+        """读取该股票所有因子表，按 Date 合并成 ``KlineIndicator`` 列表。
+
+        实现：
+          1. 第一张表（TABLE_INDICATOR）作为基准，建 ``date -> KlineIndicator`` 字典；
+          2. 后续 5 张表按 Date join 到同一个对象上；
+          3. 返回按 Date 升序排列的列表。
+
+        若某些日期只在某张表有（理论上不应该），会以并集形式给出。
+        """
+        date_to_ind: dict[str, "KlineIndicator"] = {}
+        for table, pairs in self._factor_table_specs():
+            rows = self._read_factor_table(table, name, pairs,
+                                            start_date, end_date)
+            for row in rows:
+                date = str(row[0]) if row[0] is not None else ""
+                if not date:
+                    continue
+                ind = date_to_ind.get(date)
+                if ind is None:
+                    ind = KlineIndicator()
+                    ind.date = date
+                    date_to_ind[date] = ind
+                # 复用 _row_to_indicator 的字段填充逻辑
+                self._row_to_indicator(row, pairs, base=ind)
+        return [date_to_ind[d] for d in sorted(date_to_ind.keys())]
+
+    # ============================================================
     # 兼容旧 API（让上层代码不用改）
     # ============================================================
 

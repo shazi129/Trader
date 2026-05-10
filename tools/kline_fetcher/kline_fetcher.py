@@ -14,6 +14,9 @@
      不完整的"伪日 K"写进数据库；
    - 调用 ``QuoteAPI.get_klines(name, start_date=..., end_date=有效终点)`` 抓数据；
    - ``StockDB.write_kline_data_many()`` 批量入库（UPSERT，不会重复）。
+   - **写库成功后**自动调 ``compute_and_save_factors`` 同步刷新因子表，
+     保证 ``factor_indicator`` 与 ``kline_daily`` 的最新日期一致；因子计算
+     失败不影响 K 线拉取结果。
 3. 单只股票失败不影响其它股票，整体输出统计。
 
 两种运行模式
@@ -49,6 +52,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from database.stock_db_utils import StockDB  # noqa: E402
+from quantitative.factor_batch import compute_and_save_factors  # noqa: E402
 from quote_api import QuoteAPIFactory  # noqa: E402
 from quote_api.stock_meta import StockMarket, get_meta  # noqa: E402
 from utils.logger import get_logger  # noqa: E402
@@ -250,6 +254,26 @@ def fetch_one(api, db: StockDB, task: StockTask, cfg: FetcherConfig,
 
     _log.info("[%s] 成功写入 %d 条 (%s ~ %s)",
               task.name_key, len(quotes), quotes[0].date, quotes[-1].date)
+
+    # K 线已写库 → 同步刷新因子表，保证 kline_daily 和 factor_indicator
+    # 的最新日期一致（stock_advisor._load_or_build 用这个判等来决定是否重算）。
+    # 失败不影响本次 K 线拉取结果：因子下次跑分析时还会被 _load_or_build 兜底重算。
+    try:
+        ok_fac = compute_and_save_factors(
+            task.name_key,
+            api_name=cfg.api_name,
+            db_path=cfg.db_path,
+            limit=5000,
+            force_refresh=False,
+        )
+        if ok_fac:
+            _log.info("[%s] 因子表已同步", task.name_key)
+        else:
+            _log.warning("[%s] 因子计算返回失败，跳过", task.name_key)
+    except Exception as e:
+        _log.error("[%s] 因子计算异常（不影响 K 线入库结果）: %s",
+                   task.name_key, e)
+
     return True, len(quotes), start
 
 
