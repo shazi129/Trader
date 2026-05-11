@@ -72,7 +72,7 @@ class QuantAnalyzer:
         stock_info = config.global_stock_list.get(name_key)
         report = AnalysisReport(
             stock_name=stock_info.name if stock_info else name_key,
-            stock_code=stock_info.code if stock_info else "",
+            name_key=name_key,
             data_source=self.api,
             data_days=len(quotes),
             latest_price=quotes[-1].close,

@@ -1,7 +1,3 @@
 {
-    "stocks": {
-        "Tencent": "116.00700",
-        "Alibaba": "116.09988",
-        "COMEX_AG": "101.SI00Y"
-    }
+    "stocks": {}
 }

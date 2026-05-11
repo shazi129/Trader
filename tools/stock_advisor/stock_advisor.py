@@ -131,9 +131,8 @@ def _build_markdown(report: AnalysisReport,
                     backtest_n: Optional[int] = None) -> str:
     """组合 markdown 报告。"""
     lines: list[str] = []
-    lines.append(f"# {report.stock_name}({report.stock_code}) 综合分析报告")
+    lines.append(f"# {report.stock_name}({name_key}) 综合分析报告")
     lines.append("")
-    lines.append(f"- 股票 key: `{name_key}`")
     lines.append(f"- 数据源: {report.data_source}")
     lines.append(f"- 数据量: {report.data_days} 天")
     if backtest_n is not None and backtest_n != report.data_days:
@@ -270,7 +269,7 @@ def analyze_stock(name_key: str, *, api: str = "eastmoney",
 
     report = AnalysisReport(
         stock_name=stock_info.name,
-        stock_code=stock_info.code,
+        name_key=name_key,
         data_source=api,
         data_days=len(quotes),
         latest_price=quotes[-1].close,

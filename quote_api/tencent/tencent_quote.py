@@ -72,11 +72,12 @@ class TencentQuoteAPI(QuoteAPI):
         limit: Optional[int] = None,
     ) -> list[DailyQuote]:
         stock = get_meta(name)
-        if stock is None:
-            print("[TencentQuoteAPI] unknown stock: %s" % name)
+        code = self.get_stock_code(name)
+        if stock is None or code is None:
+            print("[TencentQuoteAPI] unknown / unsupported stock: %s" % name)
             return []
 
-        symbol = self._tencent_symbol(stock.market, stock.code)
+        symbol = self._tencent_symbol(stock.market, code)
         if symbol is None:
             print("[TencentQuoteAPI] market not supported: %s" % stock.market)
             return []
@@ -146,9 +147,10 @@ class TencentQuoteAPI(QuoteAPI):
     # ------------------------------------------------------------------
     def _fetch_realtime(self, name: str) -> Optional[DailyQuote]:
         stock = get_meta(name)
-        if stock is None:
+        code = self.get_stock_code(name)
+        if stock is None or code is None:
             return None
-        symbol = self._tencent_symbol(stock.market, stock.code)
+        symbol = self._tencent_symbol(stock.market, code)
         if symbol is None:
             return None
 

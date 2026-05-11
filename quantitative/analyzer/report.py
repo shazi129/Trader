@@ -26,7 +26,7 @@ _SIGNAL_ICONS = {1: "[+]", -1: "[-]", 0: "[ ]"}
 def generate_summary(report: AnalysisReport) -> str:
     """把 AnalysisReport 渲染成可读的文本摘要。"""
     lines: list[str] = []
-    lines.append(f"[分析] {report.stock_name}({report.stock_code}) 量化分析报告")
+    lines.append(f"[分析] {report.stock_name}({report.name_key}) 量化分析报告")
     lines.append(f"   数据源: {report.data_source} | 数据量: {report.data_days}天")
     lines.append(f"   最新价: {report.latest_price:.2f}")
     lines.append("")

@@ -1,22 +1,11 @@
 {
     "api": "sina",
     "stocks": [
-        {
-            "name_key": "Tencent",
-            "name": "腾讯",
-            "show": true
-        },
-        {
-            "name_key": "Alibaba",
-            "name": "阿里巴巴",
-            "show": false
-        },
-        {
-            "name_key": "COMEX_AG",
-            "name": "Comex白银",
-            "show": false
-        }
+        "Tencent",
+        "Alibaba",
+        "COMEX_AG"
     ],
+    "active": "Tencent",
     "refresh_interval": 60,
     "opacity": 0.75,
     "font_size": 12,

@@ -25,11 +25,8 @@ python stock_widget.py
 ```json
 {
     "api": "sina",
-    "stocks": [
-        { "name_key": "Tencent",  "name": "腾讯",     "show": true  },
-        { "name_key": "Alibaba",  "name": "阿里巴巴", "show": false },
-        { "name_key": "COMEX_AG", "name": "Comex白银","show": false }
-    ],
+    "stocks": ["Tencent", "Alibaba", "COMEX_AG"],
+    "active": "Alibaba",
     "refresh_interval": 60,
     "opacity": 0.75,
     "font_size": 12,
@@ -40,15 +37,17 @@ python stock_widget.py
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `api` | string | 数据源：`"sina"` / `"tencent"` / `"eastmoney"` |
-| `stocks[].name_key` | string | `STOCK_META` 里的逻辑标识（见 `quote_api/stock_meta.py`） |
-| `stocks[].name` | string | 显示名；空串时自动从 `STOCK_META` 取中文名 |
-| `stocks[].show` | bool | 是否显示在浮窗上 |
+| `stocks` | string[] | 候选股票的 `name_key` 列表，对应 `quote_api/stock_meta.py` 中 `STOCK_META` 的键；展示名直接从 `STOCK_META` 读取 |
+| `active` | string | 当前显示的 `name_key`，必须出现在 `stocks` 中；右键"切换股票"会写回此字段 |
 | `refresh_interval` | int | 刷新秒数 |
 | `opacity` | float | 窗口透明度 0.0 – 1.0 |
 | `font_size` | int | 字号 |
 | `position` | string | `"top_left"` / `"top_right"` / `"bottom_left"` / `"bottom_right"` |
 
 右键菜单里也能临时切"当前显示的股票"和"数据源"，会落盘回 `config.json`。
+
+> 兼容旧格式：旧版 `stocks` 为 `[{"name_key":..., "name":..., "show":...}]` 的写法仍可被读取，
+> 启动时会自动归一化为新格式（首个 `show: true` 的项作为 `active`）。
 
 ## 数据源支持度
 

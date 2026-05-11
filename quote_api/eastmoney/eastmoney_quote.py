@@ -64,17 +64,18 @@ class EastMoneyQuoteAPI(QuoteAPI):
     # ------------------------------------------------------------------
     def _get_secid(self, name: str) -> Optional[str]:
         stock = get_meta(name)
-        if stock is None:
+        code = self.get_stock_code(name)
+        if stock is None or code is None:
             return None
         match stock.market:
             case StockMarket.SH:
-                return "1.%s" % stock.code
+                return "1.%s" % code
             case StockMarket.SZ:
-                return "0.%s" % stock.code
+                return "0.%s" % code
             case StockMarket.HK:
-                return "116.%s" % stock.code
+                return "116.%s" % code
             case StockMarket.COMEX:
-                return "101.%s" % stock.code
+                return "101.%s" % code
         return None
 
     # ------------------------------------------------------------------
@@ -308,12 +309,12 @@ class EastMoneyQuoteAPI(QuoteAPI):
             # 使用东方财富的财务摘要接口
             try:
                 # 通过股票代码获取财务数据
-                stock = get_meta(name)
-                if stock:
+                code = self.get_stock_code(name)
+                if code:
                     # 构造请求获取财务摘要
                     fin_params = {
                         "type": "0",  # 0=按年度
-                        "code": stock.code,
+                        "code": code,
                     }
                     # 注意：这个接口可能需要不同的URL，这里先留作扩展
                     # 可以后续添加 ak.stock_financial_abstract_ths 的直连版本

@@ -9,7 +9,6 @@ Windows 11 浮空股票报价小控件 (PySide6)
 import sys
 import json
 from pathlib import Path
-from dataclasses import dataclass
 from typing import Optional
 
 # 让 `tools/stock_widget/` 子目录直接运行时也能 import 项目根包
@@ -33,38 +32,23 @@ SUPPORTED_APIS = ("tencent", "eastmoney", "sina")
 DEFAULT_API = "tencent"
 
 
-@dataclass
-class StockConfig:
-    """单只股票的配置
-
-    核心字段是 name_key —— 对应 config.global_stock_list 的键，
-    各 API 实现内部自行根据 name_key 查找股票代码。
-    """
-    name_key: str            # global_stock_list 的键（唯一标识）
-    name: str                # 自定义显示名（空串时运行时从 global_stock_list 取）
-    show: bool               # 是否在 widget 上显示
-
-
-def _resolve_display_name(s: StockConfig) -> str:
-    """如果 name 为空，尝试从 global_stock_list 获取中文名。"""
-    if s.name:
-        return s.name
+def _resolve_display_name(name_key: str) -> str:
+    """从 stock_meta 获取展示名；查不到则回退到 name_key 本身。"""
     try:
-        import config as app_config
-        info = app_config.global_stock_list.get(s.name_key)
+        from quote_api.stock_meta import get_meta
+        info = get_meta(name_key)
         if info is not None:
             return info.name
     except Exception:
         pass
-    return s.name_key
+    return name_key
 
 
 def load_config() -> dict:
     default = {
         "api": DEFAULT_API,
-        "stocks": [
-            {"name_key": "Tencent", "name": "腾讯", "show": True},
-        ],
+        "stocks": ["Tencent"],
+        "active": "Tencent",
         "refresh_interval": 5,
         "opacity": 0.75,
         "font_size": 12,
@@ -84,20 +68,31 @@ def load_config() -> dict:
         api = DEFAULT_API
     default["api"] = api
 
-    # 将 stocks 字典列表转为 StockConfig 对象列表
-    normalized: list[StockConfig] = []
-    for s in default["stocks"]:
-        if isinstance(s, StockConfig):
-            normalized.append(s)
-            continue
-        # 兼容旧配置：如果只有 stock_code 没有 name_key，则 name_key 留空
-        name_key = s.get("name_key", "")
-        normalized.append(StockConfig(
-            name_key=name_key,
-            name=s.get("name", ""),
-            show=bool(s.get("show", False)),
-        ))
-    default["stocks"] = normalized
+    # 归一化 stocks：兼容旧的 [{"name_key":..., "show":...}] 格式
+    raw_stocks = default.get("stocks") or []
+    stocks: list[str] = []
+    legacy_active: Optional[str] = None
+    for s in raw_stocks:
+        if isinstance(s, str):
+            if s:
+                stocks.append(s)
+        elif isinstance(s, dict):
+            key = s.get("name_key", "")
+            if not key:
+                continue
+            stocks.append(key)
+            if s.get("show"):
+                legacy_active = key
+    if not stocks:
+        stocks = ["Tencent"]
+    default["stocks"] = stocks
+
+    # 归一化 active：必须是 stocks 中的一个
+    active = default.get("active") or legacy_active or stocks[0]
+    if active not in stocks:
+        active = stocks[0]
+    default["active"] = active
+
     return default
 
 
@@ -106,14 +101,8 @@ def save_config(config: dict) -> None:
     try:
         data = {
             "api": config.get("api", DEFAULT_API),
-            "stocks": [
-                {
-                    "name_key": s.name_key,
-                    "name": s.name,
-                    "show": s.show,
-                }
-                for s in config["stocks"]
-            ],
+            "stocks": list(config.get("stocks", [])),
+            "active": config.get("active", ""),
             "refresh_interval": config.get("refresh_interval", 5),
             "opacity": config.get("opacity", 0.75),
             "font_size": config.get("font_size", 12),
@@ -123,14 +112,6 @@ def save_config(config: dict) -> None:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
         print(f"[save_config] error: {e}")
-
-
-def get_active_stock(config: dict) -> Optional[StockConfig]:
-    """获取当前 show=True 的股票配置，返回第一个匹配的"""
-    for s in config["stocks"]:
-        if s.show:
-            return s
-    return None
 
 # ---------------------------------------------------------------------------
 # 数据获取线程
@@ -146,25 +127,25 @@ class FetchThread(QThread):
     """
     result_ready = Signal(object)  # DailyQuote | str("UNSUPPORTED") | None
 
-    def __init__(self, api: str, stock: StockConfig, parent=None):
+    def __init__(self, api: str, name_key: str, parent=None):
         super().__init__(parent)
         self.api = api
-        self.stock = stock
+        self.name_key = name_key
 
     # ------------------------------------------------------------------
     def run(self):
         quote = None
         try:
-            quote = self._fetch_via_quote_api(self.api, self.stock)
+            quote = self._fetch_via_quote_api(self.api, self.name_key)
         except Exception as e:
             print(f"[FetchThread] error ({self.api}): {e}")
             quote = None
         self.result_ready.emit(quote)
 
     # ------------------------------------------------------------------
-    def _fetch_via_quote_api(self, api: str, stock: StockConfig):
-        if not stock.name_key:
-            print(f"[FetchThread] stock '{stock.name}' missing 'name_key', cannot query api={api}")
+    def _fetch_via_quote_api(self, api: str, name_key: str):
+        if not name_key:
+            print(f"[FetchThread] missing name_key, cannot query api={api}")
             return None
 
         try:
@@ -180,13 +161,13 @@ class FetchThread(QThread):
             return None
 
         # 检查当前 API 是否支持该 name_key
-        if not impl.is_supported(stock.name_key):
-            print(f"[FetchThread] api '{api}' does not support '{stock.name_key}'")
+        if not impl.is_supported(name_key):
+            print(f"[FetchThread] api '{api}' does not support '{name_key}'")
             return "UNSUPPORTED"
 
         # 1) 取当前最新一条
         try:
-            last = impl.get_daily_quote(stock.name_key, date=None)
+            last = impl.get_daily_quote(name_key, date=None)
         except Exception as e:
             print(f"[FetchThread] get_daily_quote error ({api}): {e}")
             return None
@@ -197,7 +178,7 @@ class FetchThread(QThread):
         prev_close = last.pre_close if last.pre_close > 0 else 0.0
         if prev_close <= 0:
             try:
-                klines = impl.get_klines(stock.name_key, limit=2)
+                klines = impl.get_klines(name_key, limit=2)
             except Exception as e:
                 print(f"[FetchThread] get_klines fallback error ({api}): {e}")
                 klines = []
@@ -212,13 +193,13 @@ class FetchThread(QThread):
         last.pre_close = prev_close
         last.change = round(last.close - prev_close, 4)
         last.change_pct = round((last.change / prev_close * 100) if prev_close > 0 else 0.0, 2)
-        last.name = stock.name or stock.name_key
+        last.name = _resolve_display_name(name_key)
 
-        # 币种按 global_stock_list 中的 market 推断
+        # 币种按 stock_meta 中的 market 推断
         try:
-            import config as app_config
+            from quote_api.stock_meta import get_meta
             from quote_api import StockMarket
-            info = app_config.global_stock_list.get(stock.name_key)
+            info = get_meta(name_key)
             if info is not None:
                 _market_currency = {
                     StockMarket.HK: "HKD",
@@ -320,8 +301,8 @@ class StockWidget(QWidget):
         if self._fetching:
             return
 
-        active = get_active_stock(self.config)
-        if active is None:
+        active = self.config.get("active") or ""
+        if not active:
             self.label.setText("--")
             return
 
@@ -390,12 +371,14 @@ class StockWidget(QWidget):
 
         # 股票切换子菜单
         stock_menu = menu.addMenu("切换股票")
-        for stock in self.config["stocks"]:
+        active_key = self.config.get("active", "")
+        for name_key in self.config["stocks"]:
+            mark = "✔ " if name_key == active_key else "   "
             action = QAction(
-                f"{'✔ ' if stock.show else '   '}{_resolve_display_name(stock)} ({stock.name_key})",
+                f"{mark}{_resolve_display_name(name_key)} ({name_key})",
                 self,
             )
-            action.triggered.connect(lambda checked=False, s=stock: self._switch_stock(s))
+            action.triggered.connect(lambda checked=False, k=name_key: self._switch_stock(k))
             stock_menu.addAction(action)
 
         # 数据源切换子菜单
@@ -425,10 +408,13 @@ class StockWidget(QWidget):
 
         menu.exec(QCursor.pos())
 
-    def _switch_stock(self, target: StockConfig):
-        """切换显示的股票：将目标设为 show=True，其余设为 False，并立即刷新"""
-        for s in self.config["stocks"]:
-            s.show = (s is target)
+    def _switch_stock(self, name_key: str):
+        """切换显示的股票：将 active 设为目标 name_key，并立即刷新"""
+        if name_key not in self.config["stocks"]:
+            return
+        if name_key == self.config.get("active"):
+            return
+        self.config["active"] = name_key
         save_config(self.config)
         self.label.setText("--")
         self._fetch()

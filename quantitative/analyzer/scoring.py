@@ -22,7 +22,7 @@ class FactorResult:
 class AnalysisReport:
     """综合分析报告。"""
     stock_name: str
-    stock_code: str
+    name_key: str
     data_source: str
     data_days: int
     latest_price: float

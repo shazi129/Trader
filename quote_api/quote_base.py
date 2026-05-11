@@ -126,14 +126,22 @@ class QuoteAPI:
     DEFAULT_TIMEOUT: int = 8
 
     def __init__(self) -> None:
-        self._api_stocks: dict[str, str] = {}  # name_key -> stock_code
+        # name_key -> override stock_code
+        # 语义（三态）：
+        #   - 缺 key            → 该源支持，使用 STOCK_META 中的默认 code
+        #   - value == ""       → 该源不支持这只股票（白名单显式排除）
+        #   - value 非空字符串  → 该源支持，且用此值覆盖默认 code
+        self._api_stocks: dict[str, str] = {}
         self._load_api_config()
 
     # ------------------------------------------------------------------
     def _load_api_config(self) -> None:
-        """从子类所在目录的 config.json 加载 name_key -> stock_code 映射。
+        """从子类所在目录的 config.json 加载 name_key -> override 映射。
 
-        config.json 格式: {"stocks": {"Tencent": "hk00700", ...}}
+        config.json 格式: {"stocks": {"Tencent": "", "NVIDIA": "1234", ...}}
+            - 缺 key            → 用 STOCK_META 默认 code
+            - "" / null         → 该源不支持
+            - 非空字符串        → override 默认 code
         """
         try:
             # 取子类文件所在目录
@@ -145,7 +153,10 @@ class QuoteAPI:
                     data = json.load(f)
                 stocks = data.get("stocks")
                 if isinstance(stocks, dict):
-                    self._api_stocks = {str(k): str(v) for k, v in stocks.items()}
+                    self._api_stocks = {
+                        str(k): ("" if v is None else str(v))
+                        for k, v in stocks.items()
+                    }
         except Exception as e:
             print(f"[{self.SOURCE}] load api config error: {e}")
 
@@ -153,14 +164,30 @@ class QuoteAPI:
     def is_supported(self, name_key: str) -> bool:
         """判断当前 API 是否支持指定的 name_key。
 
-        以本数据源的 config.json（即 self._api_stocks）为权威清单。
-        子类如有更复杂规则，可自行 override。
+        规则：
+        - 在 config.json 中显式声明为 "" → 不支持
+        - 在 config.json 中声明为非空 → 支持（override）
+        - 不在 config.json 中 → 看 STOCK_META 是否定义了该 name_key
         """
-        return name_key in self._api_stocks
+        if name_key in self._api_stocks:
+            return self._api_stocks[name_key] != ""
+        # 延迟 import 防循环依赖
+        from quote_api.stock_meta import has as _meta_has
+        return _meta_has(name_key)
 
     def get_stock_code(self, name_key: str) -> Optional[str]:
-        """获取 name_key 对应的 API 专属 stock_code；不支持则返回 None。"""
-        return self._api_stocks.get(name_key)
+        """获取 name_key 对应的 stock_code。
+
+        - 在 config.json 中显式声明为 "" → 返回 None（不支持）
+        - 在 config.json 中声明为非空 → 返回该 override 值
+        - 不在 config.json 中 → 返回 STOCK_META 中的默认 code（无则 None）
+        """
+        if name_key in self._api_stocks:
+            override = self._api_stocks[name_key]
+            return override if override else None
+        from quote_api.stock_meta import get_meta as _get_meta
+        meta = _get_meta(name_key)
+        return meta.code if meta else None
 
     # ------------------------------------------------------------------
     # 子类必须实现：批量 K 线

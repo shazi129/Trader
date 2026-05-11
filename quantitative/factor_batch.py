@@ -276,28 +276,52 @@ class FactorSeriesEngine:
 # 批量处理与保存
 # ===========================================================================
 
+#: 因子计算所需的最少 K 线条数（用于 sanity check）。
+#: 取值依据：最长窗口 ma75w = 375 根 + 252 日风险滚动 + EMA/HV 预热缓冲 ≈ 600。
+#: 不再用作"拉取条数限制"——拉取范围由 cached_api 内部按 [meta.listing_date, today]
+#: 区间补齐策略决定。
+MIN_BARS_FOR_FACTORS = 600
+
+
 def compute_and_save_factors(stock_name: str, api_name: str = "tencent",
                              db_path: Optional[str] = None,
-                             limit: int = 5000,
+                             limit: Optional[int] = None,
                              force_refresh: bool = False) -> bool:
-    """计算并保存指定股票的所有因子到数据库。"""
+    """计算并保存指定股票的所有因子到数据库。
+
+    :param limit: 可选的"只用最近 N 条 K 线参与计算"上限。``None`` 表示用 DB 中
+        ``[meta.listing_date, today]`` 的全部数据。**不影响上游拉取范围**——
+        拉取永远按区间补齐策略，由 ``CachedQuoteAPI`` 决定是否分批请求上游。
+    """
 
     _log.info("开始处理股票: %s", stock_name)
 
     # 1. 获取K线数据（Factory 内部已做单例缓存，重复调用不会创建新实例）
     _log.info("正在从 %s 获取K线数据...", api_name)
     if force_refresh:
-        _log.info("强制刷新模式：直接从API获取")
+        # 强制刷新模式：跳过 DB 缓存，直接走上游全区间拉取（不再用 limit）
+        _log.info("强制刷新模式：直接从API获取（按区间）")
         raw_api = QuoteAPIFactory.create(api_name)
-        quotes = raw_api.get_klines(stock_name, limit=limit)
+        # 让上游按其默认起点拉（区间内），再由本地切片
+        quotes = raw_api.get_klines(stock_name)
     else:
         cached_api = QuoteAPIFactory.create_with_cache(api_name)
-        quotes = cached_api.get_klines(stock_name, limit=limit)
+        # 不传 limit/start_date：CachedQuoteAPI 会按 meta.listing_date ~ today
+        # 区间补齐缺失数据，并在内部分批向上游请求。
+        quotes = cached_api.get_klines(stock_name)
     if not quotes:
         _log.warning("无法获取 %s 的K线数据", stock_name)
         return False
 
-    _log.info("获取到 %d 条K线数据", len(quotes))
+    # 调用方传 limit 时仅做尾部截断（用于"只算最近 N 条"的场景）
+    if limit and limit > 0 and len(quotes) > limit:
+        quotes = quotes[-limit:]
+
+    if len(quotes) < MIN_BARS_FOR_FACTORS:
+        _log.warning("获取到 %d 条K线，少于因子最长窗口 %d 条，部分因子可能为空",
+                     len(quotes), MIN_BARS_FOR_FACTORS)
+    else:
+        _log.info("获取到 %d 条K线数据", len(quotes))
 
     # 2. 因子计算 + 入库（同一个 DB 连接里完成所有写入）
     _log.info("正在计算所有因子...")
@@ -351,7 +375,8 @@ def main():
     parser = argparse.ArgumentParser(description="批量计算并保存因子到数据库")
     parser.add_argument("--stock", help="指定股票名称 (如 Tencent)，不指定则处理所有")
     parser.add_argument("--api", default="tencent", help="API数据源 (default: tencent)")
-    parser.add_argument("--limit", type=int, default=5000, help="K线数据数量")
+    parser.add_argument("--limit", type=int, default=None,
+                        help="可选：只用最近 N 条 K 线参与计算（默认用全部）")
     parser.add_argument("--db", help="数据库路径 (默认: database/stock_data.db)")
     parser.add_argument("--force-refresh", action="store_true",
                         help="强制从API刷新数据（忽略缓存）")

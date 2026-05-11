@@ -93,11 +93,12 @@ class SinaQuoteAPI(QuoteAPI):
         limit: Optional[int] = None,
     ) -> list[DailyQuote]:
         stock = get_meta(name)
-        if stock is None:
-            print("[SinaQuoteAPI] unknown stock: %s" % name)
+        code = self.get_stock_code(name)
+        if stock is None or code is None:
+            print("[SinaQuoteAPI] unknown / unsupported stock: %s" % name)
             return []
 
-        symbol = self._sina_symbol(stock.market, stock.code, realtime=False)
+        symbol = self._sina_symbol(stock.market, code, realtime=False)
         if symbol is None:
             print("[SinaQuoteAPI] market not supported: %s" % stock.market)
             return []
@@ -192,9 +193,10 @@ class SinaQuoteAPI(QuoteAPI):
     # ------------------------------------------------------------------
     def _fetch_realtime(self, name: str) -> Optional[DailyQuote]:
         stock = get_meta(name)
-        if stock is None:
+        code = self.get_stock_code(name)
+        if stock is None or code is None:
             return None
-        symbol = self._sina_symbol(stock.market, stock.code, realtime=True)
+        symbol = self._sina_symbol(stock.market, code, realtime=True)
         if symbol is None:
             return None
 

@@ -7,13 +7,14 @@
 2. 对每只股票：
    - 从数据库 ``kline_daily`` 表查 ``get_latest_date(name_key)``：
      * 若已有记录 → 从 **最新日期 + 1 天** 开始拉（增量补齐）；
-     * 若无记录 → 从配置中的 ``earliest_date`` 起拉（股票自己的 ``earliest_date``
-       优先于全局，再没配则回落到 ``StockInfo.listing_date``）；
+     * 若无记录 → 从 ``task.earliest_date`` 起拉，未配则回落到
+       ``StockInfo.listing_date``（不再有"全局 earliest_date"）；
    - 按个股 ``StockInfo.market`` 判定今日是否已收盘（A 股 15:00 / 港股 16:00 /
      美股美东 16:00）。**今天未收盘则 end_date 回退到最近工作日**，避免把盘中
      不完整的"伪日 K"写进数据库；
-   - 调用 ``QuoteAPI.get_klines(name, start_date=..., end_date=有效终点)`` 抓数据；
-   - ``StockDB.write_kline_data_many()`` 批量入库（UPSERT，不会重复）。
+   - 调用 ``CachedQuoteAPI.get_klines(name, start_date, end_date)`` 抓数据：
+     缓存层会自动按 ~600 交易日窗口分批向上游请求，并在内部 UPSERT 入库，
+     fetcher 不需要自己控制 limit 或处理写库；
    - **写库成功后**自动调 ``compute_and_save_factors`` 同步刷新因子表，
      保证 ``factor_indicator`` 与 ``kline_daily`` 的最新日期一致；因子计算
      失败不影响 K 线拉取结果。
@@ -83,7 +84,6 @@ class StockTask:
 class FetcherConfig:
     api_name: str
     db_path: Optional[str]
-    earliest_date: str                # 全局兜底起始日
     schedule_time: str                # "HH:MM"
     stocks: list[StockTask]
 
@@ -110,7 +110,6 @@ def load_config(path: Path) -> FetcherConfig:
     return FetcherConfig(
         api_name=str(raw.get("api", "eastmoney")),
         db_path=raw.get("db_path") or None,
-        earliest_date=str(raw.get("earliest_date", "2010-01-01")),
         schedule_time=str(raw.get("schedule_time", "17:30")),
         stocks=stocks,
     )
@@ -202,10 +201,11 @@ def _resolve_end_date(name_key: str, today: datetime.date) -> str:
     return end.strftime("%Y-%m-%d")
 
 
-def _resolve_start_date(db: StockDB, task: StockTask, cfg: FetcherConfig) -> str:
+def _resolve_start_date(db: StockDB, task: StockTask) -> Optional[str]:
     """决定起始拉取日期。
 
-    优先级：DB 最新日期 +1 > task.earliest_date > StockInfo.listing_date > cfg.earliest_date
+    优先级：DB 最新日期 +1 > task.earliest_date > StockInfo.listing_date。
+    全部为空时返回 None，让上游 / 缓存层按其默认起点处理。
     """
     latest = db.get_latest_date(task.name_key)
     if latest:
@@ -216,10 +216,9 @@ def _resolve_start_date(db: StockDB, task: StockTask, cfg: FetcherConfig) -> str
 
     meta = get_meta(task.name_key)
     if meta and meta.listing_date:
-        # 不早于全局兜底；防止个别股票上市日期太久远拖慢首次拉取
-        return max(meta.listing_date, cfg.earliest_date)
+        return meta.listing_date
 
-    return cfg.earliest_date
+    return None
 
 
 def fetch_one(api, db: StockDB, task: StockTask, cfg: FetcherConfig,
@@ -228,31 +227,30 @@ def fetch_one(api, db: StockDB, task: StockTask, cfg: FetcherConfig,
 
     :return: (是否成功, 新增条数, 起始日期)
     """
-    start = _resolve_start_date(db, task, cfg)
+    start = _resolve_start_date(db, task)
     end = _resolve_end_date(task.name_key, today)
 
-    if start > end:
+    if start and start > end:
         _log.info("[%s] 已是最新或当日未收盘（start=%s, end=%s），跳过",
                   task.name_key, start, end)
         return True, 0, start
 
     try:
+        # 走 cached_api：内部按区间补齐 + 自动分批拉上游，
+        # 调用方不需要再关心"limit / 单次最大窗口"。
         quotes = api.get_klines(task.name_key, start_date=start, end_date=end)
     except Exception as e:
         _log.error("[%s] 拉取失败: %s", task.name_key, e)
-        return False, 0, start
+        return False, 0, start or ""
 
     if not quotes:
-        _log.info("[%s] 区间 %s ~ %s 无新数据", task.name_key, start, end)
-        return True, 0, start
+        _log.info("[%s] 区间 %s ~ %s 无新数据",
+                  task.name_key, start or "<listing>", end)
+        return True, 0, start or ""
 
-    try:
-        db.write_kline_data_many(task.name_key, quotes)
-    except Exception as e:
-        _log.error("[%s] 写库失败: %s", task.name_key, e)
-        return False, 0, start
-
-    _log.info("[%s] 成功写入 %d 条 (%s ~ %s)",
+    # cached_api 已在内部完成入库；这里只统计区间内的总条数（含已存量）。
+    # 真正的"新增条数"由 cached_api 的日志输出，本函数无需再写一遍 DB。
+    _log.info("[%s] 当前区间共 %d 条 (%s ~ %s)",
               task.name_key, len(quotes), quotes[0].date, quotes[-1].date)
 
     # K 线已写库 → 同步刷新因子表，保证 kline_daily 和 factor_indicator
@@ -263,7 +261,7 @@ def fetch_one(api, db: StockDB, task: StockTask, cfg: FetcherConfig,
             task.name_key,
             api_name=cfg.api_name,
             db_path=cfg.db_path,
-            limit=5000,
+            limit=None,  # 不再限制条数，让因子用全量数据
             force_refresh=False,
         )
         if ok_fac:
@@ -274,7 +272,7 @@ def fetch_one(api, db: StockDB, task: StockTask, cfg: FetcherConfig,
         _log.error("[%s] 因子计算异常（不影响 K 线入库结果）: %s",
                    task.name_key, e)
 
-    return True, len(quotes), start
+    return True, len(quotes), start or ""
 
 
 def run_once(config_path: Path = DEFAULT_CONFIG_PATH) -> int:
@@ -293,7 +291,9 @@ def run_once(config_path: Path = DEFAULT_CONFIG_PATH) -> int:
               today.strftime("%Y-%m-%d"), len(enabled))
     _log.info("=" * 60)
 
-    api = QuoteAPIFactory.create(cfg.api_name)
+    # 统一走 cached_api：内部按区间补齐 + 自动分批拉上游 + 自动写库。
+    # 这样 fetcher 自己不再关心"limit / 单批最大窗口 / 写库"等细节。
+    api = QuoteAPIFactory.create_with_cache(cfg.api_name)
 
     ok_cnt = 0
     fail_cnt = 0
