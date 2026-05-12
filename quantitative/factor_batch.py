@@ -43,6 +43,16 @@ from quantitative.indicators.risk import (
     rolling_sharpe_sortino_calmar,
     rolling_skew_kurt,
 )
+from quantitative.indicators.liquidity import (
+    turnover_rate_ma,
+    turnover_rate_zscore,
+    amount_ma,
+    amount_ratio,
+    amihud_illiquidity_series,
+    illiquidity_rank_series,
+    vol_price_corr,
+    money_flow_strength,
+)
 from database.stock_db_utils import StockDB
 from quote_api import QuoteAPIFactory
 from quote_api.quote_base import DailyQuote
@@ -72,6 +82,8 @@ class FactorSeriesEngine:
         self.highs = [q.high for q in quotes]
         self.lows = [q.low for q in quotes]
         self.volumes = [q.volume for q in quotes]
+        self.turnovers = [q.turnover for q in quotes]
+        self.turnover_rates = [getattr(q, "turnover_rate", 0.0) for q in quotes]
         self.dates = [q.date for q in quotes]
 
     # ------------------------------------------------------------------
@@ -93,6 +105,7 @@ class FactorSeriesEngine:
         self._compute_volume_factors(indicators)
         self._compute_risk_factors(indicators)
         self._compute_ma_ratios(indicators)
+        self._compute_liquidity_factors(indicators)
         return indicators
 
     # ------------------------------------------------------------------
@@ -271,6 +284,35 @@ class FactorSeriesEngine:
             indicators[i].skewness = skew[i]
             indicators[i].kurtosis = kurt[i]
 
+    # ------------------------------------------------------------------
+    # 流动性 / 资金面（B 类：从 K 线派生）
+    # ------------------------------------------------------------------
+    def _compute_liquidity_factors(self, indicators: list[KlineIndicator]):
+        tr_ma5 = turnover_rate_ma(self.turnover_rates, 5)
+        tr_ma20 = turnover_rate_ma(self.turnover_rates, 20)
+        tr_z20 = turnover_rate_zscore(self.turnover_rates, period=20)
+        amt_ma5 = amount_ma(self.turnovers, 5)
+        amt_ma20 = amount_ma(self.turnovers, 20)
+        amt_ratio = amount_ratio(self.turnovers, fast=5, slow=20)
+        amihud_seq = amihud_illiquidity_series(self.closes, self.turnovers,
+                                               period=20)
+        illiq_rank = illiquidity_rank_series(amihud_seq, lookback=252)
+        vp_corr = vol_price_corr(self.closes, self.turnovers, period=20)
+        mfs = money_flow_strength(self.closes, self.turnovers, period=20)
+        for i in range(self.n):
+            ind = indicators[i]
+            ind.turnover_rate = self.turnover_rates[i]
+            ind.turnover_rate_ma5 = tr_ma5[i]
+            ind.turnover_rate_ma20 = tr_ma20[i]
+            ind.turnover_rate_z20 = tr_z20[i]
+            ind.amount_ma5 = amt_ma5[i]
+            ind.amount_ma20 = amt_ma20[i]
+            ind.amount_ratio_5_20 = amt_ratio[i]
+            ind.amihud = amihud_seq[i]
+            ind.illiquidity_rank = illiq_rank[i]
+            ind.vol_price_corr_20 = vp_corr[i]
+            ind.money_flow_strength = mfs[i]
+
 
 # ===========================================================================
 # 批量处理与保存
@@ -337,9 +379,9 @@ def compute_and_save_factors(stock_name: str, api_name: str = "tencent",
         except Exception as e:
             _log.error("保存原始K线数据失败: %s", e)
 
-        _log.info("正在批量保存 6 张因子表...")
+        _log.info("正在批量保存 7 张因子表...")
         db.write_all_indicators_many(stock_name, valid_inds)
-        _log.info("批量保存完成: %d 条 × 6 张因子表", len(valid_inds))
+        _log.info("批量保存完成: %d 条 × 7 张因子表", len(valid_inds))
 
     _log.info("[OK] 完成! 股票 %s 的所有因子已保存到数据库", stock_name)
     return True

@@ -69,7 +69,8 @@ class MultiHorizonForecast:
 # ===========================================================================
 
 # (读属性名, 展示名)：这些必须都存在于 KlineIndicator 上，且在 indicator/trend/
-# momentum/ma_ratio/risk 等因子表里有写入。选的都是"单日可读、方向意义明确"的。
+# momentum/ma_ratio/risk/liquidity 等因子表里有写入。选的都是"单日可读、方向
+# 意义明确"的。
 _FEATURES: tuple[tuple[str, str], ...] = (
     ("rsi1", "RSI"),
     ("macd_hist", "MACD柱"),
@@ -83,6 +84,10 @@ _FEATURES: tuple[tuple[str, str], ...] = (
     ("ma_ratio_200", "Price/MA200"),
     ("atr_pct", "ATR%"),
     ("hv20", "20日HV"),
+    # 流动性 / 资金面（factor_liquidity）：挑 3 个最能刻画"资金面像谁"的字段
+    ("turnover_rate_z20", "换手率Z20"),
+    ("money_flow_strength", "资金强度"),
+    ("vol_price_corr_20", "量价相关20"),
 )
 
 

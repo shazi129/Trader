@@ -27,6 +27,7 @@ from .momentum import MomentumFields
 from .volume import VolumeFields
 from .risk import RiskFields
 from .ma_ratio import MARatioFields
+from .liquidity import LiquidityFields
 
 __all__ = [
     "KlineIndicator",
@@ -36,4 +37,5 @@ __all__ = [
     "VolumeFields",
     "RiskFields",
     "MARatioFields",
+    "LiquidityFields",
 ]

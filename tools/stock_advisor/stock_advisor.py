@@ -226,7 +226,8 @@ def _build_markdown(report: AnalysisReport,
     # ---- 风险提示 ----
     lines.append("## 4. 风险提示")
     lines.append("")
-    lines.append("- 以上结果**纯量价驱动**，未纳入基本面、政策面、资金面、情绪面；")
+    lines.append("- 以上结果**主要由量价 + 流动性/资金面驱动**，"
+                 "未纳入基本面、政策面、情绪面；")
     lines.append("- 历史相似态不代表未来必然重演，尤其除权除息日附近样本会失真；")
     lines.append("- 概率值仅供参考，**不构成任何投资建议**。")
     lines.append("")

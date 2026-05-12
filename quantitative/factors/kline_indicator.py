@@ -22,6 +22,7 @@ from .momentum import MomentumFields
 from .volume import VolumeFields
 from .risk import RiskFields
 from .ma_ratio import MARatioFields
+from .liquidity import LiquidityFields
 
 
 @dataclass
@@ -32,6 +33,7 @@ class KlineIndicator(
     VolumeFields,
     RiskFields,
     MARatioFields,
+    LiquidityFields,
 ):
     """k 线参数信息（单日全部因子的载体）。"""
 

@@ -13,6 +13,7 @@
    - factor_volume      : 成交量因子（替代旧的 ``<Name>_Volume``）
    - factor_risk        : 风险因子 （替代旧的 ``<Name>_Risk`` ）
    - factor_ma_ratio    : 均线比率 （替代旧的 ``<Name>_MA_Ratio``）
+   - factor_liquidity   : 流动性/资金面（B 类，从 K 线派生）
 3. 在 ``Date`` 上额外建索引，方便横截面（同日全市场）查询。
 4. 对外方法签名保持兼容：仍然接受 ``name`` 作为股票 key，调用方无需感知列变化。
 """
@@ -53,6 +54,7 @@ class StockDB:
     TABLE_VOLUME = "factor_volume"
     TABLE_RISK = "factor_risk"
     TABLE_MA_RATIO = "factor_ma_ratio"
+    TABLE_LIQUIDITY = "factor_liquidity"
 
     @staticmethod
     def _round(value, precision: int):
@@ -156,6 +158,19 @@ class StockDB:
         "MA_Ratio_30W_75W": "REAL", "MA_Ratio_5W_30W": "REAL",
     }
 
+    # 流动性 / 资金面（B 类：从 K 线派生）
+    _liquidity_columns = {
+        "Symbol": "TEXT NOT NULL",
+        "Date": "DATE NOT NULL",
+        "TurnoverRate": "REAL",
+        "TurnoverRate_MA5": "REAL", "TurnoverRate_MA20": "REAL",
+        "TurnoverRate_Z20": "REAL",
+        "Amount_MA5": "REAL", "Amount_MA20": "REAL",
+        "Amount_Ratio_5_20": "REAL",
+        "Amihud": "REAL", "IlliquidityRank": "REAL",
+        "VolPriceCorr20": "REAL", "MoneyFlowStrength": "REAL",
+    }
+
     # 表 -> schema 映射
     _TABLE_SCHEMA = None  # 延迟在 __init__ 中赋值（依赖类属性）
 
@@ -191,6 +206,7 @@ class StockDB:
             self.TABLE_VOLUME: self._volume_columns,
             self.TABLE_RISK: self._risk_columns,
             self.TABLE_MA_RATIO: self._ma_ratio_columns,
+            self.TABLE_LIQUIDITY: self._liquidity_columns,
         }
 
         self._ensure_schema()
@@ -518,6 +534,19 @@ class StockDB:
             ("MA_Ratio_30W_75W", "ma_ratio_30w_75w"),
             ("MA_Ratio_5W_30W", "ma_ratio_5w_30w"),
         ],
+        "TABLE_LIQUIDITY": [
+            ("TurnoverRate", "turnover_rate"),
+            ("TurnoverRate_MA5", "turnover_rate_ma5"),
+            ("TurnoverRate_MA20", "turnover_rate_ma20"),
+            ("TurnoverRate_Z20", "turnover_rate_z20"),
+            ("Amount_MA5", "amount_ma5"),
+            ("Amount_MA20", "amount_ma20"),
+            ("Amount_Ratio_5_20", "amount_ratio_5_20"),
+            ("Amihud", "amihud"),
+            ("IlliquidityRank", "illiquidity_rank"),
+            ("VolPriceCorr20", "vol_price_corr_20"),
+            ("MoneyFlowStrength", "money_flow_strength"),
+        ],
     }
 
     def _factor_table_specs(self) -> List[tuple]:
@@ -732,6 +761,7 @@ class StockDB:
             "volume":    self.get_row_count(name, self.TABLE_VOLUME),
             "risk":      self.get_row_count(name, self.TABLE_RISK),
             "ma_ratio":  self.get_row_count(name, self.TABLE_MA_RATIO),
+            "liquidity": self.get_row_count(name, self.TABLE_LIQUIDITY),
         }
 
     def get_stock_ratio_data(self, denominator_key: str, numerator_key: str) -> List[DataValue]:
