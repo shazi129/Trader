@@ -51,8 +51,14 @@ from utils.logger import get_logger  # noqa: E402
 # 用 try/except 兼容两种入口。
 try:
     from .backtester import HorizonBacktester, MultiHorizonForecast  # noqa: E402
+    from .fundamental_view import (  # noqa: E402
+        FundamentalSnapshot, build_snapshot,
+    )
 except ImportError:
     from backtester import HorizonBacktester, MultiHorizonForecast  # type: ignore  # noqa: E402
+    from fundamental_view import (  # type: ignore  # noqa: E402
+        FundamentalSnapshot, build_snapshot,
+    )
 
 _log = get_logger(__name__)
 
@@ -128,7 +134,8 @@ def _direction_icon(prob_up: Optional[float]) -> str:
 def _build_markdown(report: AnalysisReport,
                     forecast: Optional[MultiHorizonForecast],
                     name_key: str,
-                    backtest_n: Optional[int] = None) -> str:
+                    backtest_n: Optional[int] = None,
+                    fundamental: Optional[FundamentalSnapshot] = None) -> str:
     """组合 markdown 报告。"""
     lines: list[str] = []
     lines.append(f"# {report.stock_name}({name_key}) 综合分析报告")
@@ -223,8 +230,17 @@ def _build_markdown(report: AnalysisReport,
     lines.append("```")
     lines.append("")
 
+    # ---- 基本面快照（来自最新一份已公告财报）----
+    lines.append("## 4. 基本面快照（最新已公告财报）")
+    lines.append("")
+    lines.append("> 来自 `financial_report` 表。**季度级低频信息**，不参与上方"
+                 "回测的 z-score 相似度匹配；仅作为辅助判断。")
+    lines.append("")
+    lines.extend(_render_fundamental(fundamental))
+    lines.append("")
+
     # ---- 风险提示 ----
-    lines.append("## 4. 风险提示")
+    lines.append("## 5. 风险提示")
     lines.append("")
     lines.append("- 以上结果**主要由量价 + 流动性/资金面驱动**，"
                  "未纳入基本面、政策面、情绪面；")
@@ -232,6 +248,133 @@ def _build_markdown(report: AnalysisReport,
     lines.append("- 概率值仅供参考，**不构成任何投资建议**。")
     lines.append("")
     return "\n".join(lines)
+
+
+# ===========================================================================
+# 基本面渲染（独立成函数，便于单测 / 后续替换）
+# ===========================================================================
+
+def _fmt_money_yi(v: Optional[float]) -> str:
+    """元 → 亿元，保留 2 位小数。None → 'N/A'。"""
+    if v is None:
+        return "N/A"
+    return f"{v / 1e8:,.2f} 亿"
+
+
+def _fmt_pct(v: Optional[float], plus_sign: bool = False) -> str:
+    """小数 → 百分比字符串。None → 'N/A'。"""
+    if v is None:
+        return "N/A"
+    fmt = f"{v * 100:+.2f}%" if plus_sign else f"{v * 100:.2f}%"
+    return fmt
+
+
+def _fmt_eps(v: Optional[float]) -> str:
+    if v is None:
+        return "N/A"
+    return f"{v:.3f} 元/股"
+
+
+def _fmt_ratio(v: Optional[float], unit: str = "") -> str:
+    if v is None:
+        return "N/A"
+    return f"{v:.2f}{unit}"
+
+
+def _render_fundamental(snap: Optional[FundamentalSnapshot]) -> list[str]:
+    """把 FundamentalSnapshot 渲染成 markdown 行列表。"""
+    if snap is None:
+        return ["> _暂无财报数据_（该股票未通过 `financial_fetcher` 入库，"
+                "或截至当前交易日无已公告财报）。"]
+
+    out: list[str] = []
+    audited = "经审计" if snap.audited else "未经审计"
+    out.append(f"- 报告期: **{snap.period_end}**（{snap.period_type}, "
+               f"{audited}, 币种 {snap.currency}）")
+    out.append(f"- 公告日: {snap.announce_date}")
+    out.append("")
+
+    # 规模
+    out.append("### 规模")
+    out.append("")
+    out.append("| 项目 | 数值 |")
+    out.append("|------|------|")
+    out.append(f"| 营业收入 | {_fmt_money_yi(snap.revenue)} |")
+    out.append(f"| 归母净利润（IFRS） | {_fmt_money_yi(snap.net_income_attr)} |")
+    if snap.net_income_attr_nonifrs is not None:
+        out.append(
+            f"| 归母净利润（Non-IFRS） | "
+            f"{_fmt_money_yi(snap.net_income_attr_nonifrs)} |"
+        )
+    out.append(f"| 总资产 | {_fmt_money_yi(snap.total_assets)} |")
+    out.append(f"| 归母权益 | {_fmt_money_yi(snap.total_equity_attr)} |")
+    out.append(f"| 经营性现金流 | {_fmt_money_yi(snap.operating_cash_flow)} |")
+    if snap.free_cash_flow is not None:
+        out.append(f"| 自由现金流 | {_fmt_money_yi(snap.free_cash_flow)} |")
+    out.append("")
+
+    # 盈利能力
+    out.append("### 盈利能力")
+    out.append("")
+    out.append("| 指标 | 数值 |")
+    out.append("|------|------|")
+    out.append(f"| 毛利率 | {_fmt_pct(snap.gross_margin)} |")
+    out.append(f"| 净利率（归母 / 营收） | {_fmt_pct(snap.net_margin)} |")
+    out.append(f"| 单期 ROE（归母净利 / 归母权益） | "
+               f"{_fmt_pct(snap.roe_quarterly)} |")
+    out.append(f"| 基本 EPS | {_fmt_eps(snap.eps_basic)} |")
+    if snap.eps_basic_nonifrs is not None:
+        out.append(f"| 基本 EPS（Non-IFRS） | "
+                   f"{_fmt_eps(snap.eps_basic_nonifrs)} |")
+    out.append("")
+    out.append("> 说明：单期 ROE 是**当期口径**，不是年化 / TTM。年报数据可"
+               "近似看作年度 ROE；季报口径偏低，仅做横向对比。")
+    out.append("")
+
+    # 成长性
+    out.append("### 成长性（同比）")
+    out.append("")
+    if (snap.revenue_yoy is None and snap.net_income_yoy is None
+            and snap.net_income_nonifrs_yoy is None):
+        out.append("> 未找到上年同期数据，同比指标暂缺。")
+        out.append("")
+    else:
+        out.append("| 指标 | 同比 |")
+        out.append("|------|------|")
+        out.append(f"| 营收 YoY | {_fmt_pct(snap.revenue_yoy, plus_sign=True)} |")
+        out.append(f"| 归母净利 YoY（IFRS） | "
+                   f"{_fmt_pct(snap.net_income_yoy, plus_sign=True)} |")
+        if snap.net_income_nonifrs_yoy is not None:
+            out.append(f"| 归母净利 YoY（Non-IFRS） | "
+                       f"{_fmt_pct(snap.net_income_nonifrs_yoy, plus_sign=True)} |")
+        out.append("")
+
+    # 财务健康
+    out.append("### 财务健康")
+    out.append("")
+    out.append("| 指标 | 数值 | 解读 |")
+    out.append("|------|------|------|")
+    da = snap.debt_to_assets
+    da_tag = "—"
+    if da is not None:
+        da_tag = "稳健" if da < 0.5 else ("中等" if da < 0.7 else "偏高")
+    out.append(f"| 资产负债率 | {_fmt_pct(da)} | {da_tag} |")
+    cn = snap.cash_to_net_income
+    cn_tag = "—"
+    if cn is not None:
+        cn_tag = ("利润含金量高" if cn >= 1.0
+                  else "现金流弱于利润" if cn >= 0.5
+                  else "盈利质量待观察")
+    out.append(f"| OCF / 归母净利 | {_fmt_ratio(cn)} | {cn_tag} |")
+    out.append("")
+
+    if snap.warnings:
+        out.append("> 提示：")
+        for w in snap.warnings:
+            out.append(f"> - {w}")
+        out.append("")
+
+    return out
 
 
 # ===========================================================================
@@ -287,8 +430,20 @@ def analyze_stock(name_key: str, *, api: str = "eastmoney",
     bt = HorizonBacktester(quotes, indicators)
     forecast = bt.run(top_k=top_k)
 
-    # 4. 渲染 markdown，控制台打印 + 落盘
-    md = _build_markdown(report, forecast, name_key, backtest_n=bt.n)
+    # 4. 基本面快照（最新一份已公告财报；缺数据自动 fallback 到 None）
+    #    传 as_of=最新交易日，确保 PIT 合规（不会拿到未公告的数据）。
+    fundamental: Optional[FundamentalSnapshot] = None
+    try:
+        with closing(StockDB(db_path)) as db:
+            fundamental = build_snapshot(name_key, db,
+                                          as_of=quotes[-1].date)
+    except Exception as e:  # noqa: BLE001
+        # 财报模块是辅助信息，任何异常都不该阻断主分析
+        _log.warning("[%s] 基本面快照失败: %s", name_key, e)
+
+    # 5. 渲染 markdown，控制台打印 + 落盘
+    md = _build_markdown(report, forecast, name_key,
+                         backtest_n=bt.n, fundamental=fundamental)
     print("\n" + md + "\n")
 
     if not write_report:

@@ -55,6 +55,7 @@ class StockDB:
     TABLE_RISK = "factor_risk"
     TABLE_MA_RATIO = "factor_ma_ratio"
     TABLE_LIQUIDITY = "factor_liquidity"
+    TABLE_FINANCIAL = "financial_report"   # 季度财报（事件表，主键 Symbol+PeriodEnd）
 
     @staticmethod
     def _round(value, precision: int):
@@ -171,6 +172,51 @@ class StockDB:
         "VolPriceCorr20": "REAL", "MoneyFlowStrength": "REAL",
     }
 
+    # 财报数据（事件表，按报告期入库）
+    # 主键: (Symbol, PeriodEnd)；与日频长表不同，不走 _create_long_table。
+    # 单位: 金额=元，EPS=元/股，比率字段为小数（与项目其它表一致）。
+    _financial_columns = {
+        "Symbol": "TEXT NOT NULL",
+        "PeriodEnd": "DATE NOT NULL",            # 报告期末
+        "PeriodType": "TEXT",                    # Q1/H1/Q3/ANNUAL
+        "AnnounceDate": "DATE",                  # 公告日（PIT 关键）
+        "Currency": "TEXT",                      # CNY/HKD/USD
+        "Audited": "INTEGER",                    # 0/1
+        "Source": "TEXT",                        # pdf_hk_ifrs / pdf_a_share
+        "SourceFile": "TEXT",                    # PDF 文件名（debug）
+        "LastModified": "DATETIME DEFAULT CURRENT_TIMESTAMP",
+        # ---- 利润表 ----
+        "Revenue": "REAL", "RevenueTotal": "REAL",
+        "OperatingCost": "REAL", "GrossProfit": "REAL",
+        "SellingExpense": "REAL", "AdminExpense": "REAL",
+        "RnDExpense": "REAL", "FinanceExpense": "REAL",
+        "InterestIncome": "REAL",
+        "OperatingProfit": "REAL", "OperatingProfit_NonIFRS": "REAL",
+        "IncomeBeforeTax": "REAL", "TaxExpense": "REAL",
+        "NetIncome": "REAL", "NetIncomeAttr": "REAL",
+        "NetIncomeAttr_NonIFRS": "REAL", "NetIncomeNonRecur": "REAL",
+        # ---- EPS / 比率 ----
+        "EPS_Basic": "REAL", "EPS_Diluted": "REAL",
+        "EPS_Basic_NonIFRS": "REAL", "EPS_Diluted_NonIFRS": "REAL",
+        "WeightedROE": "REAL",
+        # ---- 资产负债表 ----
+        "TotalAssets": "REAL", "CurrentAssets": "REAL", "NonCurrentAssets": "REAL",
+        "Cash": "REAL", "Inventory": "REAL", "AccountsReceivable": "REAL",
+        "TotalLiabilities": "REAL", "CurrentLiabilities": "REAL",
+        "NonCurrentLiabilities": "REAL",
+        "ShortTermDebt": "REAL", "LongTermDebt": "REAL",
+        "AccountsPayable": "REAL",
+        "TotalEquity": "REAL", "TotalEquityAttr": "REAL",
+        "MinorityInterest": "REAL",
+        # ---- 现金流量表 ----
+        "OperatingCashFlow": "REAL", "InvestingCashFlow": "REAL",
+        "FinancingCashFlow": "REAL", "CapEx": "REAL",
+        "DividendPaid": "REAL", "Depreciation": "REAL",
+        "FreeCashFlow": "REAL",
+        # ---- 股本 ----
+        "SharesOutstanding": "REAL",
+    }
+
     # 表 -> schema 映射
     _TABLE_SCHEMA = None  # 延迟在 __init__ 中赋值（依赖类属性）
 
@@ -210,6 +256,7 @@ class StockDB:
         }
 
         self._ensure_schema()
+        self._ensure_financial_schema()
 
     def close(self):
         """显式关闭数据库连接"""
@@ -292,6 +339,99 @@ class StockDB:
             f"PRIMARY KEY (Symbol, Date))"
         )
         self._cursor.execute(sql)
+
+    # ============================================================
+    # 财报事件表（主键 Symbol + PeriodEnd，与日频长表分开维护）
+    # ============================================================
+
+    def _ensure_financial_schema(self):
+        """创建 financial_report 表（如不存在）+ 自动补缺列 + 建索引。"""
+        cols = self._financial_columns
+        cols_sql = ", ".join(f"{k} {v}" for k, v in cols.items())
+        self._cursor.execute(
+            f"CREATE TABLE IF NOT EXISTS {self.TABLE_FINANCIAL} ("
+            f"{cols_sql}, PRIMARY KEY (Symbol, PeriodEnd))"
+        )
+        # 跟其它表一样支持自动补列
+        self._migrate_add_missing_columns(self.TABLE_FINANCIAL, cols)
+        # 公告日索引：PIT 查询 "截至 X 日可见的最新报告" 用得上
+        self._cursor.execute(
+            f"CREATE INDEX IF NOT EXISTS idx_{self.TABLE_FINANCIAL}_announce "
+            f"ON {self.TABLE_FINANCIAL}(Symbol, AnnounceDate)"
+        )
+        self._connection.commit()
+
+    def write_financial_report(self, report) -> None:
+        """写入一份 ``FinancialReport``（INSERT OR REPLACE 幂等）。
+
+        :param report: ``quote_api.financial.FinancialReport`` 实例
+        """
+        cols = self._financial_columns
+        row = {
+            "Symbol": report.name_key,
+            "PeriodEnd": report.period_end,
+            "PeriodType": report.period_type,
+            "AnnounceDate": report.announce_date,
+            "Currency": report.currency,
+            "Audited": 1 if report.audited else 0,
+            "Source": report.source,
+            "SourceFile": report.source_file,
+        }
+        # 把 fields dict 中存在的列填入，未提供的列由 SQLite 写 NULL
+        for k in cols:
+            if k in row:
+                continue
+            v = report.fields.get(k)
+            if v is not None:
+                row[k] = v
+        self._upsert(self.TABLE_FINANCIAL, row)
+
+    def write_financial_reports_many(self, reports: list) -> None:
+        """批量写入多份 FinancialReport。"""
+        for r in reports:
+            self.write_financial_report(r)
+
+    def get_financial_reports(self, name: str,
+                              start_period: Optional[str] = None,
+                              end_period: Optional[str] = None) -> List[dict]:
+        """读取该股票的财报历史，按 PeriodEnd 升序返回 list of dict。
+
+        :param start_period: 含；YYYY-MM-DD 格式
+        :param end_period: 含
+        """
+        cols = list(self._financial_columns.keys())
+        sql = (
+            f"SELECT {','.join(cols)} FROM {self.TABLE_FINANCIAL} "
+            f"WHERE Symbol=?"
+        )
+        params: list = [name]
+        if start_period:
+            sql += " AND PeriodEnd>=?"
+            params.append(start_period)
+        if end_period:
+            sql += " AND PeriodEnd<=?"
+            params.append(end_period)
+        sql += " ORDER BY PeriodEnd ASC"
+        try:
+            self._cursor.execute(sql, params)
+            rows = self._cursor.fetchall()
+            return [dict(zip(cols, r)) for r in rows]
+        except sqlite3.Error as e:
+            _log.warning("get_financial_reports error: %s", e)
+            return []
+
+    def get_latest_financial_period(self, name: str) -> Optional[str]:
+        """该股票已入库的最新报告期末（YYYY-MM-DD）。"""
+        try:
+            self._cursor.execute(
+                f"SELECT MAX(PeriodEnd) FROM {self.TABLE_FINANCIAL} WHERE Symbol=?",
+                (name,),
+            )
+            row = self._cursor.fetchone()
+            return row[0] if row and row[0] else None
+        except sqlite3.Error as e:
+            _log.warning("get_latest_financial_period error: %s", e)
+            return None
 
     # ============================================================
     # 通用写入（参数化，避免 SQL 注入 & 引号问题）
