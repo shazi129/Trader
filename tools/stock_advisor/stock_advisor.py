@@ -54,10 +54,16 @@ try:
     from .fundamental_view import (  # noqa: E402
         FundamentalSnapshot, build_snapshot,
     )
+    from .fundamental_trend import (  # noqa: E402
+        FundamentalTrend, analyze_long_term,
+    )
 except ImportError:
     from backtester import HorizonBacktester, MultiHorizonForecast  # type: ignore  # noqa: E402
     from fundamental_view import (  # type: ignore  # noqa: E402
         FundamentalSnapshot, build_snapshot,
+    )
+    from fundamental_trend import (  # type: ignore  # noqa: E402
+        FundamentalTrend, analyze_long_term,
     )
 
 _log = get_logger(__name__)
@@ -135,7 +141,8 @@ def _build_markdown(report: AnalysisReport,
                     forecast: Optional[MultiHorizonForecast],
                     name_key: str,
                     backtest_n: Optional[int] = None,
-                    fundamental: Optional[FundamentalSnapshot] = None) -> str:
+                    fundamental: Optional[FundamentalSnapshot] = None,
+                    fundamental_trend: Optional[FundamentalTrend] = None) -> str:
     """组合 markdown 报告。"""
     lines: list[str] = []
     lines.append(f"# {report.stock_name}({name_key}) 综合分析报告")
@@ -239,12 +246,22 @@ def _build_markdown(report: AnalysisReport,
     lines.extend(_render_fundamental(fundamental))
     lines.append("")
 
+    # ---- 长期基本面分析与预测 ----
+    lines.append("## 5. 长期基本面分析与预测")
+    lines.append("")
+    lines.append("> 基于近 20 期（5 年）财报历史，识别趋势 + 外推未来 4 个季度，"
+                 "并结合当前股价计算隐含估值。**仅做定量参考，无法预测拐点。**")
+    lines.append("")
+    lines.extend(_render_fundamental_trend(fundamental_trend))
+    lines.append("")
+
     # ---- 风险提示 ----
-    lines.append("## 5. 风险提示")
+    lines.append("## 6. 风险提示")
     lines.append("")
     lines.append("- 以上结果**主要由量价 + 流动性/资金面驱动**，"
                  "未纳入基本面、政策面、情绪面；")
-    lines.append("- 历史相似态不代表未来必然重演，尤其除权除息日附近样本会失真；")
+    lines.append("- 历史相似态不代表未来必然重演，尤其除权除息日附近样本会失真;")
+    lines.append("- 长期基本面预测基于趋势外推，**不能预测拐点 / 监管 / 突发事件**；")
     lines.append("- 概率值仅供参考，**不构成任何投资建议**。")
     lines.append("")
     return "\n".join(lines)
@@ -378,6 +395,181 @@ def _render_fundamental(snap: Optional[FundamentalSnapshot]) -> list[str]:
 
 
 # ===========================================================================
+# 长期基本面渲染
+# ===========================================================================
+
+def _render_fundamental_trend(t: Optional[FundamentalTrend]) -> list[str]:
+    """渲染长期趋势分析的 markdown 段落。"""
+    if t is None:
+        return ["> _财报数据不足，无法做长期分析（至少需要 4 期）_"]
+
+    out: list[str] = []
+    out.append(f"_基于 **{t.period_count}** 期历史财报数据_")
+    out.append("")
+
+    # ---- 5.1 历史轨迹 ----
+    out.append("### 5.1 关键指标历史轨迹（近 12 期摘要）")
+    out.append("")
+    # 太长会影响阅读，只展示最近 12 期
+    show_history = t.history[-12:] if len(t.history) > 12 else t.history
+    out.append("| 期次 | 营收(亿) | 营收 YoY | 归母净利(亿) | 归母 YoY "
+               "| 毛利率 | 净利率 |")
+    out.append("|------|---------|----------|-------------|---------"
+               "|--------|--------|")
+    for h in show_history:
+        out.append(
+            f"| {h.period_label} "
+            f"| {_fmt_yi_value(h.revenue)} "
+            f"| {_fmt_pct(h.revenue_yoy, plus_sign=True)} "
+            f"| {_fmt_yi_value(h.net_income_attr)} "
+            f"| {_fmt_pct(h.net_income_yoy, plus_sign=True)} "
+            f"| {_fmt_pct(h.gross_margin)} "
+            f"| {_fmt_pct(h.net_margin)} |"
+        )
+    out.append("")
+    if len(t.history) > 12:
+        out.append(f"_完整 {len(t.history)} 期数据已用于趋势计算，"
+                   f"此处仅展示最近 12 期_")
+        out.append("")
+
+    # ---- 5.2 趋势归纳 ----
+    out.append("### 5.2 趋势归纳")
+    out.append("")
+    if not t.trends:
+        out.append("> 数据不足，趋势分析跳过。")
+        out.append("")
+    else:
+        out.append("> 比率类指标（毛利率/净利率/ROE/负债率）用近 8 期最小二乘拟合；"
+                   "YoY 类指标对基数效应敏感，改用「近 4 期 vs 近 8 期中位数对比」"
+                   "判断加速/减速。")
+        out.append("")
+        out.append("| 指标 | 关键观察 | 方向 |")
+        out.append("|------|---------|------|")
+        for tr in t.trends:
+            out.append(f"| {tr.metric} | {tr.description} | {tr.direction} |")
+        out.append("")
+
+    # ---- 5.3 未来 4 期预测 ----
+    out.append("### 5.3 未来 4 个季度预测（YoY 承接 + 线性外推 投票）")
+    out.append("")
+    if not t.forecast:
+        out.append("> 数据不足，预测跳过。")
+        out.append("")
+    else:
+        out.append("| 期次 | 预测营收(亿) | 预测归母净利(亿) | 不确定度 |")
+        out.append("|------|-------------|-----------------|----------|")
+        for fc in t.forecast:
+            conf_tag = ("高" if fc.confidence_pct < 0.05
+                        else "中" if fc.confidence_pct < 0.15
+                        else "低")
+            out.append(
+                f"| {fc.period_label} "
+                f"| {_fmt_yi_value(fc.revenue_forecast)} "
+                f"| {_fmt_yi_value(fc.net_income_forecast)} "
+                f"| {conf_tag}（分歧 {fc.confidence_pct * 100:.1f}%） |"
+            )
+        out.append("")
+        out.append("> **不确定度**：两种预测方法的分歧度。**高** = 两法基本一致，"
+                   "可信度高；**低** = 两法分歧大，趋势可能拐点附近。")
+        out.append("")
+
+    # ---- 5.4 隐含估值 ----
+    if t.valuation is not None:
+        v = t.valuation
+        out.append("### 5.4 当前股价的隐含估值")
+        out.append("")
+        out.append("| 项目 | 数值 |")
+        out.append("|------|------|")
+        out.append(f"| 推算流通股数 | {v.shares_outstanding / 1e8:.2f} 亿股 |")
+        out.append(f"| 当前总市值 | {v.market_cap / 1e8:,.2f} 亿元 |")
+        out.append(f"| TTM 归母净利 | {v.ttm_net_income / 1e8:,.2f} 亿元 |")
+        if v.pe_ttm is not None:
+            out.append(f"| **当前 PE_TTM** | **{v.pe_ttm:.2f}x** |")
+        if v.forward_net_income > 0:
+            out.append(
+                f"| 远期 4 期预测净利 | {v.forward_net_income / 1e8:,.2f} 亿元 |"
+            )
+        if v.pe_forward is not None:
+            out.append(f"| **远期 PE（forward）** | **{v.pe_forward:.2f}x** |")
+        if v.pe_history_median is not None:
+            out.append(f"| 历史 PE 中位数（近 12 期） "
+                       f"| {v.pe_history_median:.2f}x |")
+        out.append("")
+        if (v.fair_price_low is not None and v.fair_price_high is not None
+                and v.fair_price_mid is not None):
+            out.append("**公允价格区间**（历史 PE 中位数 × 远期 EPS, ±20% 估值带）：")
+            out.append("")
+            out.append(f"- 下沿: **{v.fair_price_low:.2f}**")
+            out.append(f"- 中值: **{v.fair_price_mid:.2f}**")
+            out.append(f"- 上沿: **{v.fair_price_high:.2f}**")
+            if v.upside_pct is not None:
+                tag = ("**低估**" if v.upside_pct > 0.20
+                       else "**高估**" if v.upside_pct < -0.20
+                       else "公允区间")
+                out.append(f"- 当前价相对中值: **{v.upside_pct * 100:+.1f}%** "
+                           f"({tag})")
+            out.append("")
+        out.append("> **估值方法局限**：")
+        out.append("> - 股数从 EPS 反推（加权平均，与期末值有 ~1% 误差）；")
+        out.append("> - 历史 PE 用每份财报**公告日真实收盘价 / 该期 NI_TTM** 算出，"
+                   "再取近 12 期（3 年）中位数作为估值锚；")
+        out.append("> - PE 中位数 × 远期 EPS 假设市场仍按近 3 年估值水平定价，"
+                   "**不适用于商业模式 / 成长性发生质变的公司**；")
+        out.append("> - 早期高成长高估值期（如 2015~2018 PE 35x+）已剔除，"
+                   "防止拉偏中枢。")
+        out.append("")
+
+    # ---- 综合判断 ----
+    out.append("### 5.5 综合判断")
+    out.append("")
+    out.append(t.summary)
+    out.append("")
+
+    return out
+
+
+def _fmt_yi_value(v: Optional[float]) -> str:
+    """元 → 亿元（不带单位字，节约表格宽度）。"""
+    if v is None:
+        return "N/A"
+    return f"{v / 1e8:,.0f}"
+
+
+def _build_price_map(quotes: list[DailyQuote],
+                     rows_pit: list[dict]) -> dict[str, float]:
+    """为每份财报的 announce_date 找一个最接近的有效收盘价。
+
+    财报公告日通常落在交易日，但偶尔会是周末（港股盘后公告也算公告日）。
+    策略：取 announce_date 当日 close，若不存在则取该日**之后**的第一个
+    交易日 close（公告之后的市场反应价更能体现"市场如何看待这份财报"）。
+    """
+    # 用 (date, close) 列表二分查找
+    valid = [(q.date, q.close) for q in quotes
+             if q.close is not None and q.close > 0 and q.date]
+    if not valid:
+        return {}
+    valid.sort(key=lambda x: x[0])
+    dates = [d for d, _ in valid]
+
+    out: dict[str, float] = {}
+    for r in rows_pit:
+        ad = r.get("AnnounceDate")
+        if not ad:
+            continue
+        # bisect: 找第一个 >= ad 的位置
+        lo, hi = 0, len(dates)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if dates[mid] < ad:
+                lo = mid + 1
+            else:
+                hi = mid
+        if lo < len(valid):
+            out[ad] = valid[lo][1]
+    return out
+
+
+# ===========================================================================
 # 主流程
 # ===========================================================================
 
@@ -433,17 +625,33 @@ def analyze_stock(name_key: str, *, api: str = "eastmoney",
     # 4. 基本面快照（最新一份已公告财报；缺数据自动 fallback 到 None）
     #    传 as_of=最新交易日，确保 PIT 合规（不会拿到未公告的数据）。
     fundamental: Optional[FundamentalSnapshot] = None
+    fundamental_trend: Optional[FundamentalTrend] = None
     try:
         with closing(StockDB(db_path)) as db:
             fundamental = build_snapshot(name_key, db,
                                           as_of=quotes[-1].date)
+            # 长期分析需要全量历史 rows + 当前价 + 历史股价
+            rows = db.get_financial_reports(name_key)
+            cutoff = quotes[-1].date
+            rows_pit = [r for r in rows
+                        if r.get("AnnounceDate") and r["AnnounceDate"] <= cutoff]
+            if rows_pit:
+                # 构建 announce_date → close 映射，用真实历史股价算历史 PE
+                # （没找到的日期会从公告后第一个交易日就近回填）
+                price_map = _build_price_map(quotes, rows_pit)
+                fundamental_trend = analyze_long_term(
+                    rows_pit, current_price=quotes[-1].close,
+                    price_history=price_map,
+                )
     except Exception as e:  # noqa: BLE001
         # 财报模块是辅助信息，任何异常都不该阻断主分析
-        _log.warning("[%s] 基本面快照失败: %s", name_key, e)
+        _log.warning("[%s] 基本面分析失败: %s", name_key, e)
 
     # 5. 渲染 markdown，控制台打印 + 落盘
     md = _build_markdown(report, forecast, name_key,
-                         backtest_n=bt.n, fundamental=fundamental)
+                         backtest_n=bt.n,
+                         fundamental=fundamental,
+                         fundamental_trend=fundamental_trend)
     print("\n" + md + "\n")
 
     if not write_report:
