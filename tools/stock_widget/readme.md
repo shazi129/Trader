@@ -25,7 +25,7 @@ python stock_widget.py
 ```json
 {
     "api": "sina",
-    "stocks": ["Tencent", "Alibaba", "COMEX_AG"],
+    "stocks": ["Tencent", "Alibaba", "AG"],
     "active": "Alibaba",
     "refresh_interval": 60,
     "opacity": 0.75,

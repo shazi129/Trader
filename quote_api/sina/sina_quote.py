@@ -3,10 +3,11 @@
 
 接口说明：
 
-1) 实时快照（A 股 / 港股）
+1) 实时快照（A 股 / 港股 / 美股）
    https://hq.sinajs.cn/list=<symbol>
    - A 股 symbol：sh600519 / sz000001
    - 港股 symbol：rt_hk00700  （港股必须用 rt_ 前缀）
+   - 美股 symbol：gb_nvda / gb_aapl
    - 必须带 Referer=https://finance.sina.com.cn，否则 403
    - 响应是 GBK 编码的 JS 片段：
        var hq_str_sh600519="贵州茅台,1680.00,1699.00,1705.50,...";
@@ -16,9 +17,14 @@
        [0]=英文名 [1]=中文名 [2]=今开 [3]=昨收 [4]=最高 [5]=最低
        [6]=最新价 [7]=涨跌额 [8]=涨跌幅 ... [10]=成交量 [11]=成交额
        [17]=日期 [18]=时间
+     美股字段顺序（gb_）:
+       [0]=中文名 [1]=最新价 [2]=涨跌幅% [3]=时间(北京) [4]=涨跌额
+       [5]=今开 [6]=最高 [7]=最低 [8]=52周高 [9]=52周低
+       [10]=成交量(股) [11]=10日均量 [12]=市值 [13]=EPS [14]=PE
+       [24]=美东时间 [25]=收盘时间 [26]=昨收
 
 2) 历史 K 线
-   - A 股：
+   - A 股 / 美股：
      https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData
        ?symbol=sh600519&scale=240&ma=no&datalen=<n>
      scale=240 即日线；返回 JSON 数组：
@@ -72,7 +78,7 @@ class SinaQuoteAPI(QuoteAPI):
     def _sina_symbol(self, market: StockMarket, code: str, realtime: bool = False) -> Optional[str]:
         """生成新浪接口使用的 symbol。
 
-        realtime=True 用于实时行情：港股需要 rt_ 前缀。
+        realtime=True 用于实时行情：港股需要 rt_ 前缀；美股用 gb_ 前缀走实时/历史同一套。
         """
         if market == StockMarket.SH:
             return "sh%s" % code
@@ -81,7 +87,11 @@ class SinaQuoteAPI(QuoteAPI):
         if market == StockMarket.HK:
             hk_code = code.zfill(5)
             return ("rt_hk%s" % hk_code) if realtime else ("hk%s" % hk_code)
-        # COMEX 等在新浪财经不统一支持
+        if market in (StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US):
+            return "gb_%s" % code.lower()
+        if market == StockMarket.COMEX:
+            return "hf_%s" % code.upper()
+        # 其他市场在新浪财经不统一支持
         return None
 
     # ------------------------------------------------------------------
@@ -135,7 +145,7 @@ class SinaQuoteAPI(QuoteAPI):
         self, market: StockMarket, symbol: str, count: int
     ) -> list[dict]:
         try:
-            if market in (StockMarket.SH, StockMarket.SZ):
+            if market in (StockMarket.SH, StockMarket.SZ, StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US):
                 params = {
                     "symbol": symbol,
                     "scale": 240,
@@ -219,6 +229,10 @@ class SinaQuoteAPI(QuoteAPI):
 
         if stock.market == StockMarket.HK:
             return self._parse_realtime_hk(fields, name, symbol)
+        if stock.market in (StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US):
+            return self._parse_realtime_us(fields, name, symbol)
+        if stock.market == StockMarket.COMEX:
+            return self._parse_realtime_futures(fields, name, symbol)
         return self._parse_realtime_cn(fields, name, symbol)
 
     # ------------------------------------------------------------------
@@ -286,6 +300,89 @@ class SinaQuoteAPI(QuoteAPI):
         if q.close <= 0:
             return None
         return q
+
+    # ------------------------------------------------------------------
+    def _parse_realtime_us(self, fields: list, name: str, symbol: str) -> Optional[DailyQuote]:
+        """美股 gb_XXXX 字段顺序：
+        0:中文名 1:最新价 2:涨跌幅% 3:时间(北京) 4:涨跌额
+        5:今开 6:最高 7:最低 8:52周高 9:52周低
+        10:成交量(股) 11:10日均量 12:市值 13:EPS 14:PE
+        ... 24:美东时间 25:收盘时间(美东) 26:昨收
+        """
+        if len(fields) < 27:
+            return None
+        q = DailyQuote()
+        q.source = self.SOURCE
+        q.name = name
+        q.code = symbol
+        q.close = self._safe_float(fields[1])
+        q.open = self._safe_float(fields[5])
+        q.high = self._safe_float(fields[6])
+        q.low = self._safe_float(fields[7])
+        q.pre_close = self._safe_float(fields[26])
+        q.volume = self._safe_float(fields[10])
+        # 新浪美股实时接口不返回成交额
+        q.date = self._parse_us_date(fields[24] if len(fields) > 24 else "",
+                                     fields[3] if len(fields) > 3 else "")
+        if q.close <= 0:
+            return None
+        return q
+
+    # ------------------------------------------------------------------
+    def _parse_realtime_futures(self, fields: list, name: str, symbol: str) -> Optional[DailyQuote]:
+        """期货 hf_XXXX 字段顺序：
+        0:最新价 1:涨跌额/涨跌幅(可能空) 2:今开 3:昨收 4:最高 5:最低
+        6:时间 7:买价 8:卖价 9:成交量 10:持仓量 11:? 12:日期 13:合约名 14:?
+        """
+        if len(fields) < 13:
+            return None
+        q = DailyQuote()
+        q.source = self.SOURCE
+        q.name = name
+        q.code = symbol
+        q.close = self._safe_float(fields[0])
+        q.open = self._safe_float(fields[2])
+        q.pre_close = self._safe_float(fields[3])
+        q.high = self._safe_float(fields[4])
+        q.low = self._safe_float(fields[5])
+        q.volume = self._safe_float(fields[9])
+        q.date = self._normalize_sina_date(fields[12] if len(fields) > 12 else "")
+        if q.close <= 0:
+            return None
+        return q
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _parse_us_date(edt_str: str, cn_time_str: str) -> str:
+        """从美东时间字符串或北京时间解析日期，统一为 YYYY-MM-DD。
+        edt_str 格式如 "Jun 18 08:01PM EDT"
+        cn_time_str 格式如 "2026-06-19 09:44:37"
+        """
+        import datetime as _dt
+        # 优先用美东时间
+        if edt_str:
+            try:
+                parts = edt_str.strip().split()
+                if len(parts) >= 2:
+                    month_str = parts[0][:3]
+                    day_str = parts[1]
+                    m = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4,
+                         "May": 5, "Jun": 6, "Jul": 7, "Aug": 8,
+                         "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}.get(month_str)
+                    if m:
+                        now = _dt.datetime.now()
+                        year = now.year
+                        if m > now.month:
+                            year -= 1
+                        return "%04d-%02d-%02d" % (year, m, int(day_str))
+            except Exception:
+                pass
+        # 回退到北京时间
+        if cn_time_str:
+            s = cn_time_str.strip()[:10]
+            if s:
+                return s
+        return _dt.datetime.now().strftime("%Y-%m-%d")
 
     # ------------------------------------------------------------------
     @staticmethod

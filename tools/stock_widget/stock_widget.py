@@ -355,7 +355,7 @@ class StockWidget(QWidget):
             self._apply_style("#888888")
         elif quote is not None and isinstance(quote, DailyQuote):
             # 根据 change 的有效位数决定 price 的小数位数
-            decimals = _effective_decimals(quote.change, min_digits=1, max_digits=4)
+            decimals = _effective_decimals(quote.change, min_digits=2, max_digits=4)
             price_str = f"{quote.close:.{decimals}f}"
             if quote.change > 0:
                 sign = "+"

@@ -4,13 +4,13 @@
         "Tencent",
         "Tencent_Put",
         "Alibaba",
-        "COMEX_AG",
+        "AG",
         "NVIDIA"
     ],
-    "active": "Tencent_Put",
+    "active": "AG",
     "refresh_interval": 60,
     "opacity": 0.75,
     "font_size": 12,
     "position": "bottom_right",
-    "display_mode": "change_only"
+    "display_mode": "price_change"
 }
