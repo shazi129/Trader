@@ -78,6 +78,7 @@ class StockInfo:
 # ---------------------------------------------------------------------------
 STOCK_META: dict[str, StockInfo] = {
     "Tencent":       StockInfo('腾讯',       '00700',  StockMarket.HK,     "2004-06-16"),
+    "Tencent_Put":   StockInfo('腾讯-沽',    '14136',  StockMarket.HK,     "2025-02-25"),
     "Alibaba":       StockInfo('阿里-港',    '09988',  StockMarket.HK,     "2019-11-26"),
     "NVIDIA":        StockInfo('英伟达',     'NVDA',   StockMarket.NASDAQ, "1999-01-22"),
     "COMEX_AG":      StockInfo('Comex白银',  'SI00Y',  StockMarket.COMEX,  "2011-07-22"),

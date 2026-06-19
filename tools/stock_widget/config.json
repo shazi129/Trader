@@ -2,12 +2,15 @@
     "api": "sina",
     "stocks": [
         "Tencent",
+        "Tencent_Put",
         "Alibaba",
-        "COMEX_AG"
+        "COMEX_AG",
+        "NVIDIA"
     ],
-    "active": "Tencent",
+    "active": "Tencent_Put",
     "refresh_interval": 60,
     "opacity": 0.75,
     "font_size": 12,
-    "position": "bottom_right"
+    "position": "bottom_right",
+    "display_mode": "change_only"
 }

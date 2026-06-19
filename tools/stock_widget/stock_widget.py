@@ -31,6 +31,18 @@ CONFIG_PATH = Path(__file__).parent / "config.json"
 SUPPORTED_APIS = ("tencent", "eastmoney", "sina")
 DEFAULT_API = "tencent"
 
+# 展示模式
+DISP_PRICE_CHANGE = "price_change"    # 默认：价格|涨跌额，如 440.20|-5.20
+DISP_CHANGE_ONLY  = "change_only"     # 增量：仅涨跌额，如 -5.20
+DISP_PCT_ONLY     = "pct_only"        # 增幅：仅涨跌幅，如 -1.17%
+SUPPORTED_DISPLAY_MODES = (DISP_PRICE_CHANGE, DISP_CHANGE_ONLY, DISP_PCT_ONLY)
+DISPLAY_MODE_LABELS = {
+    DISP_PRICE_CHANGE: "价格|涨跌额",
+    DISP_CHANGE_ONLY:  "仅涨跌额",
+    DISP_PCT_ONLY:     "仅涨跌幅",
+}
+DEFAULT_DISPLAY_MODE = DISP_PRICE_CHANGE
+
 
 def _resolve_display_name(name_key: str) -> str:
     """从 stock_meta 获取展示名；查不到则回退到 name_key 本身。"""
@@ -44,6 +56,17 @@ def _resolve_display_name(name_key: str) -> str:
     return name_key
 
 
+def _effective_decimals(value: float, min_digits: int = 2, max_digits: int = 4) -> int:
+    """返回浮点数的有效小数位数：去掉末尾零后的小数位，夹在 [min_digits, max_digits] 之间。"""
+    s = f"{abs(value):.{max_digits}f}"
+    s = s.rstrip("0").rstrip(".")
+    if "." in s:
+        n = len(s.split(".")[1])
+    else:
+        n = 0
+    return max(min_digits, min(n, max_digits))
+
+
 def load_config() -> dict:
     default = {
         "api": DEFAULT_API,
@@ -53,6 +76,7 @@ def load_config() -> dict:
         "opacity": 0.75,
         "font_size": 12,
         "position": "bottom_right",
+        "display_mode": DEFAULT_DISPLAY_MODE,
     }
     if CONFIG_PATH.exists():
         try:
@@ -93,6 +117,12 @@ def load_config() -> dict:
         active = stocks[0]
     default["active"] = active
 
+    # 归一化 display_mode
+    mode = default.get("display_mode", DEFAULT_DISPLAY_MODE)
+    if mode not in SUPPORTED_DISPLAY_MODES:
+        mode = DEFAULT_DISPLAY_MODE
+    default["display_mode"] = mode
+
     return default
 
 
@@ -107,6 +137,7 @@ def save_config(config: dict) -> None:
             "opacity": config.get("opacity", 0.75),
             "font_size": config.get("font_size", 12),
             "position": config.get("position", "bottom_right"),
+            "display_mode": config.get("display_mode", DEFAULT_DISPLAY_MODE),
         }
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
@@ -323,16 +354,32 @@ class StockWidget(QWidget):
             self.label.setText("不支持")
             self._apply_style("#888888")
         elif quote is not None and isinstance(quote, DailyQuote):
-            price_str = f"{quote.close:.2f}"
+            # 根据 change 的有效位数决定 price 的小数位数
+            decimals = _effective_decimals(quote.change, min_digits=1, max_digits=4)
+            price_str = f"{quote.close:.{decimals}f}"
             if quote.change > 0:
-                change_str = f"+{quote.change:.2f}"
+                sign = "+"
             elif quote.change < 0:
-                change_str = f"{quote.change:.2f}"
+                sign = ""
             else:
-                change_str = "0.00"
-            self.label.setText(f"{price_str}|{change_str}")
+                sign = ""
+            color = "#cccccc"
+            change_str = f"{sign}{quote.change:.{decimals}f}"
+            pct_str = f"{sign}{quote.change_pct:.2f}%"
+
+            mode = self.config.get("display_mode", DEFAULT_DISPLAY_MODE)
+            if mode == DISP_CHANGE_ONLY:
+                text = change_str
+            elif mode == DISP_PCT_ONLY:
+                text = pct_str
+            else:
+                text = f"{price_str}|{change_str}"
+
+            self.label.setText(text)
+            self._apply_style(color)
         else:
             self.label.setText("--")
+            self._apply_style("#cccccc")
         # 自适应大小
         self.adjustSize()
 
@@ -390,6 +437,15 @@ class StockWidget(QWidget):
             action.triggered.connect(lambda checked=False, a=api_name: self._switch_api(a))
             api_menu.addAction(action)
 
+        # 展示模式切换子菜单
+        display_menu = menu.addMenu("展示模式")
+        current_mode = self.config.get("display_mode", DEFAULT_DISPLAY_MODE)
+        for mode_key in SUPPORTED_DISPLAY_MODES:
+            mark = "✔ " if mode_key == current_mode else "   "
+            action = QAction(f"{mark}{DISPLAY_MODE_LABELS[mode_key]}", self)
+            action.triggered.connect(lambda checked=False, m=mode_key: self._switch_display_mode(m))
+            display_menu.addAction(action)
+
         menu.addSeparator()
 
         refresh_action = QAction("刷新", self)
@@ -424,6 +480,15 @@ class StockWidget(QWidget):
         if api not in SUPPORTED_APIS or api == self.config.get("api"):
             return
         self.config["api"] = api
+        save_config(self.config)
+        self.label.setText("--")
+        self._fetch()
+
+    def _switch_display_mode(self, mode: str):
+        """切换展示模式：更新 config，写回磁盘，立即刷新"""
+        if mode not in SUPPORTED_DISPLAY_MODES or mode == self.config.get("display_mode"):
+            return
+        self.config["display_mode"] = mode
         save_config(self.config)
         self.label.setText("--")
         self._fetch()
