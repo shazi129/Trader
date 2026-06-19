@@ -37,7 +37,7 @@ class StockMarket(Enum):
     SH          = 1     # 上证
     SZ          = 2     # 深证
     HK          = 3     # 港证
-    COMEX       = 4     # 纽约商品交易所
+    FUTURES     = 4     # 国际期货
     NASDAQ      = 5     # 纳斯达克
     NYSE        = 6     # 纽约证券交易所
     US          = 7     # 美股通用
@@ -81,7 +81,7 @@ STOCK_META: dict[str, StockInfo] = {
     "Tencent_Put":   StockInfo('腾讯-沽',    '14136',  StockMarket.HK,     "2025-02-25"),
     "Alibaba":       StockInfo('阿里-港',    '09988',  StockMarket.HK,     "2019-11-26"),
     "NVIDIA":        StockInfo('英伟达',     'NVDA',   StockMarket.NASDAQ, "1999-01-22"),
-    "AG":            StockInfo('白银',  'SI00Y',  StockMarket.COMEX,  "2011-07-22"),
+    "AG":            StockInfo('白银',       'SI00Y',  StockMarket.FUTURES,  "2011-07-22"),
 }
 
 

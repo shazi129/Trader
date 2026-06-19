@@ -7,7 +7,7 @@
         "AG",
         "NVIDIA"
     ],
-    "active": "AG",
+    "active": "NVIDIA",
     "refresh_interval": 60,
     "opacity": 0.75,
     "font_size": 12,

@@ -170,7 +170,7 @@ def _is_today_closed(market: StockMarket) -> bool:
         return _is_closed_cn(now_local)
     if market == StockMarket.HK:
         return _is_closed_hk(now_local)
-    if market in (StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US, StockMarket.COMEX):
+    if market in (StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US, StockMarket.FUTURES):
         return _is_closed_us(now_local)
     # 未知市场 → 保守按"未收盘"，end_date 回退到昨天
     return False

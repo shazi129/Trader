@@ -89,7 +89,7 @@ class SinaQuoteAPI(QuoteAPI):
             return ("rt_hk%s" % hk_code) if realtime else ("hk%s" % hk_code)
         if market in (StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US):
             return "gb_%s" % code.lower()
-        if market == StockMarket.COMEX:
+        if market == StockMarket.FUTURES:
             return "hf_%s" % code.upper()
         # 其他市场在新浪财经不统一支持
         return None
@@ -231,7 +231,7 @@ class SinaQuoteAPI(QuoteAPI):
             return self._parse_realtime_hk(fields, name, symbol)
         if stock.market in (StockMarket.NASDAQ, StockMarket.NYSE, StockMarket.US):
             return self._parse_realtime_us(fields, name, symbol)
-        if stock.market == StockMarket.COMEX:
+        if stock.market == StockMarket.FUTURES:
             return self._parse_realtime_futures(fields, name, symbol)
         return self._parse_realtime_cn(fields, name, symbol)
 

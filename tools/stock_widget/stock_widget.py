@@ -234,7 +234,7 @@ class FetchThread(QThread):
             if info is not None:
                 _market_currency = {
                     StockMarket.HK: "HKD",
-                    StockMarket.COMEX: "USD",
+                    StockMarket.FUTURES: "USD",
                 }
                 last.currency = _market_currency.get(info.market, "CNY")
         except Exception:

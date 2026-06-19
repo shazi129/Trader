@@ -74,7 +74,7 @@ class EastMoneyQuoteAPI(QuoteAPI):
                 return "0.%s" % code
             case StockMarket.HK:
                 return "116.%s" % code
-            case StockMarket.COMEX:
+            case StockMarket.FUTURES:
                 return "101.%s" % code
             case StockMarket.NASDAQ:
                 return "105.%s" % code
