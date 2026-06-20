@@ -29,10 +29,14 @@ import json
 from typing import Optional
 
 import requests
+from requests import Request
 
 from quote_api.stock_meta import StockMarket
 from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, StockFundamental
 from quote_api.stock_meta import get_meta
+from utils.logger import get_logger
+
+_logger = get_logger(__name__)
 
 
 class EastMoneyQuoteAPI(QuoteAPI):
@@ -113,6 +117,10 @@ class EastMoneyQuoteAPI(QuoteAPI):
         }
 
         try:
+            req = Request("GET", self._KLINE_URL, params=params)
+            prepared = self._session.prepare_request(req)
+            _logger.debug("[EastMoney] GET %s", prepared.url)
+
             resp = self._session.get(
                 self._KLINE_URL, params=params, timeout=self.DEFAULT_TIMEOUT
             )
@@ -206,6 +214,10 @@ class EastMoneyQuoteAPI(QuoteAPI):
         }
 
         try:
+            req = Request("GET", self._RT_URL, params=params)
+            prepared = self._session.prepare_request(req)
+            _logger.debug("[EastMoney] GET %s", prepared.url)
+
             resp = self._session.get(
                 self._RT_URL, params=params, timeout=self.DEFAULT_TIMEOUT
             )
@@ -270,6 +282,10 @@ class EastMoneyQuoteAPI(QuoteAPI):
                 "ut": "fa5fd1943c7b386f172d6893dbfba10b",
             }
             
+            req = Request("GET", self._RT_URL, params=params)
+            prepared = self._session.prepare_request(req)
+            _logger.debug("[EastMoney] GET %s", prepared.url)
+
             resp = self._session.get(self._RT_URL, params=params, timeout=self.DEFAULT_TIMEOUT)
             payload = json.loads(resp.text)
             data = payload.get("data") if isinstance(payload, dict) else None

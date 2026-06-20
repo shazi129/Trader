@@ -2,6 +2,9 @@ __pycache__
 */**/__pycache__
 test/.pytest_tmp
 
+# 运行日志
+logs/
+
 # stock_advisor 自动生成的分析报告：保留目录（.gitkeep），忽略所有报告文件
 tools/stock_advisor/reports/*
 !tools/stock_advisor/reports/.gitkeep

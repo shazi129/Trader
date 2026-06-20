@@ -16,11 +16,16 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 _ROOT_NAME = "trader"
-_DEFAULT_FORMAT = "[%(name)s] %(message)s"
+_DEFAULT_FORMAT = "[%(asctime)s] [%(name)s] %(levelname)s  %(message)s"
+_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _INITIALIZED = False
+
+# 项目根目录 = utils/ 的父目录
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _ensure_root_handler() -> None:
@@ -28,11 +33,30 @@ def _ensure_root_handler() -> None:
     if _INITIALIZED:
         return
     root = logging.getLogger(_ROOT_NAME)
+
     if not root.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter(_DEFAULT_FORMAT))
-        root.addHandler(handler)
-        root.setLevel(logging.INFO)
+        # 控制台输出：INFO 及以上
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(logging.INFO)
+        stream_handler.setFormatter(logging.Formatter(
+            "[%(name)s] %(message)s"
+        ))
+        root.addHandler(stream_handler)
+
+        # 文件输出：DEBUG 及以上，写入 logs/ 目录
+        log_dir = os.path.join(_PROJECT_ROOT, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        file_handler = logging.FileHandler(
+            os.path.join(log_dir, "trader.log"),
+            encoding="utf-8",
+        )
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter(
+            _DEFAULT_FORMAT, datefmt=_DATE_FORMAT,
+        ))
+        root.addHandler(file_handler)
+
+        root.setLevel(logging.DEBUG)
         # 不向 Python 根 logger 冒泡，避免双输出
         root.propagate = False
     _INITIALIZED = True
