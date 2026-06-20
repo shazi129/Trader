@@ -63,6 +63,7 @@ class EastMoneyQuoteAPI(QuoteAPI):
     def __init__(self) -> None:
         super().__init__()
         self._session = requests.Session()
+        self._session.trust_env = False  # 绕过系统代理，避免 VPN/代理干扰
         self._session.headers.update(self._HEADERS)
 
     # ------------------------------------------------------------------

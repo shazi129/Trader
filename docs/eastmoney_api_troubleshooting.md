@@ -1,6 +1,6 @@
 # 东方财富 API 连不上问题排查与处理
 
-> 日期：2026-06-20
+> 日期：2026-06-20（持续更新）
 > 影响范围：`quote_api/eastmoney/eastmoney_quote.py`、`utils/logger.py`
 
 ## 1. 问题描述
@@ -19,15 +19,11 @@ RemoteDisconnected('Remote end closed connection without response')
 
 | 假设 | 排查方式 | 结论 |
 |------|----------|------|
-| Cookie 缺失导致反爬 | 先访问 `quote.eastmoney.com` 首页获取 Cookie 再请求 API | ❌ 无效，依旧断连 |
-| TLS 指纹检测 | 使用 `curl_cffi` 模拟 Chrome 124/131 TLS 指纹 | ❌ 无效，TCP 握手后直接 RST |
+| Cookie 缺失导致反爬 | 先访问 `quote.eastmoney.com` 首页获取 Cookie 再请求 API | ❌ 无效 |
 | `ut` 参数过期 | 尝试不同 `ut` 值 | ❌ 无效 |
 | Referer 缺失 | 添加 Referer 头 | ❌ 无效 |
-| HTTP vs HTTPS | 尝试 HTTP 明文请求 | ❌ 无效 |
 
-### 2.2 路由级诊断
-
-编写诊断脚本对东方财富各子域名逐一测试：
+### 2.2 域名级诊断
 
 ```
 quote.eastmoney.com           → ✅ 200 OK
@@ -37,11 +33,85 @@ push2.eastmoney.com           → ❌ RemoteDisconnected
 push2his.eastmoney.com        → ❌ RemoteDisconnected
 ```
 
-### 2.3 结论
+只有 API 专用域名 (`push2` / `push2his`) 被阻断，普通页面域名正常。
 
-**`push2.eastmoney.com`（IP: `47.112.165.11`）和 `push2his.eastmoney.com` 在当前网络环境下被服务端直接拒绝 TCP 连接。** 其他东方财富子域名均可正常访问，唯独这两台 API 服务器被封锁。
+### 2.3 关键转折：浏览器能通
 
-这不是代码层面的问题（不是 Cookie、TLS 指纹、UA、Referer 等能解决的），而是**网络/IP 级别的服务端阻断**。
+用户反馈：**同一 URL 在浏览器中直接输入就可以正常返回数据**，但代码里不行。这推翻了「IP 封锁」的假设——如果是 IP 封锁，浏览器也应该不通。
+
+### 2.4 HTTP 协议版本排查
+
+| 客户端 | HTTP 版本 | 结果 |
+|--------|----------|------|
+| Python `requests` | HTTP/1.1 | ❌ RemoteDisconnected |
+| Python `httpx` | HTTP/1.1 | ❌ RemoteDisconnected |
+| Python `httpx` | HTTP/2 | ❌ RemoteDisconnected |
+| 系统 `curl.exe` | HTTP/1.1 | ❌ 失败 |
+| 系统 `curl.exe` | HTTP/2 | ❌ 失败 |
+
+### 2.5 TLS 指纹绕过尝试
+
+| 方式 | 结果 |
+|------|------|
+| `curl_cffi` 模拟 Chrome 124 指纹 | ❌ 失败 |
+| `curl_cffi` 模拟 Chrome 131 指纹 | ❌ 失败 |
+
+### 2.6 代理排查
+
+发现 Windows 系统代理已开启（`127.0.0.1:10808`，SOCKS5），但通过该代理请求同样失败。
+
+| 代理方式 | 结果 |
+|----------|------|
+| 直连（不走代理） | ❌ RemoteDisconnected |
+| HTTP 代理 `127.0.0.1:10808` | ❌ ProxyError |
+| SOCKS5 代理 `127.0.0.1:10808` | ❌ RemoteDisconnected |
+
+代理端口本身可达，但代理转发出去的请求仍然被 `push2.eastmoney.com` 服务端拒绝。
+
+### 2.7 VPN 验证（关键转折）
+
+用户将 VPN 切换到**东京节点**后，Python 代码即可正常访问 `push2.eastmoney.com`。
+
+当前直连出口 IP：`120.229.21.145`（中国移动，国内 IP）
+
+| 来源 IP | 客户端类型 | 结果 |
+|---------|-----------|------|
+| 国内 IP (120.229.x.x) | 真实浏览器 (Chrome) | ✅ 通过 |
+| 国内 IP (120.229.x.x) | Python requests / httpx / curl | ❌ RST |
+| 国内 IP (120.229.x.x) | curl_cffi 模拟 Chrome | ❌ RST |
+| 东京 VPN IP | Python / curl / 任何客户端 | ✅ 通过 |
+
+**当时的结论**：东方财富按 IP 地区分级反爬——国内严格 JA4 指纹检测，海外放行。
+
+### 2.8 情况升级：海外 IP 也被封锁
+
+时间推移后，**同一东京 VPN 节点也不再可用**。
+
+当前出口 IP：`43.167.196.125`（海外）
+
+| 端点 | 国内 IP (之前) | 海外 IP (之前) | **海外 IP (现在)** |
+|------|:---:|:---:|:---:|
+| push2.eastmoney.com | RST | ✅ 200 | **502 Bad Gateway** |
+| push2his.eastmoney.com | RST | RST | RST |
+| quote.eastmoney.com | ✅ | ✅ | ✅ |
+| so.eastmoney.com | ✅ | ✅ | ✅ |
+
+变化要点：
+- **push2**：TLS 握手成功（说明指纹检测可能通过或降低），但 HTTP 层返回 `502 Bad Gateway`（nginx/1.26.2）。可能是新部署的 WAF 层面拦截，也可能是后端真实故障。
+- **push2his**：仍然在 TLS 层 RST 断连，海外 IP 也不例外。
+- **其他域名**（quote / so / datacenter）一切正常。
+
+### 2.9 最终结论：全地域 JA4 TLS 指纹反爬
+
+东方财富已将反爬策略升级为**全地域覆盖**：
+
+| 防护层级 | push2 (实时行情) | push2his (K线) |
+|---------|:---:|:---:|
+| TLS 指纹检测 | 可能（部分通过，改 HTTP 层拦截） | ✅ 严格 RST |
+| HTTP WAF | ✅ 502 Bad Gateway | — |
+| 覆盖范围 | 国内 + 海外 | 国内 + 海外 |
+
+**非浏览器 HTTP 客户端在任何地区都无法稳定访问东方财富的 API 端点。** 这是系统性反爬升级，不是临时故障。
 
 ## 3. 替代方案验证
 
@@ -54,13 +124,20 @@ push2his.eastmoney.com        → ❌ RemoteDisconnected
 
 ## 4. 处理措施
 
-### 4.1 短期：切换数据源
+### 4.1 当前方案：Sina API（已实施）
 
 在 `tools/stock_widget/config.json` 中将 `"api"` 从 `"eastmoney"` 改为 `"sina"`。
 
-> 注意：eastmoney 代码本身保留不动，待网络环境恢复后可随时切回。
+> Sina API 对全部 5 只股票均正常工作，无需翻墙，无 TLS 指纹问题。
+> ~~VPN 海外节点方案已失效（东方财富全地域升级反爬）~~
 
-### 4.2 长期：日志基础设施升级
+### 4.2 如需恢复 eastmoney：唯一可靠方案
+
+Playwright/Selenium 驱动**真实 Chrome 浏览器**，用 `page.evaluate()` 执行 `fetch()` 发起 API 请求。真实浏览器的 TLS 指纹 100% 通过检测。
+
+> 其他模拟方案（curl_cffi / CycleTLS / tls_client）均不可靠——东方财富的反爬远超常规网站，需要系统级浏览器 TLS 栈。
+
+### 4.3 日志基础设施升级
 
 为便于未来快速定位类似问题，升级了项目的日志系统。
 
@@ -82,7 +159,7 @@ push2his.eastmoney.com        → ❌ RemoteDisconnected
 - 三处 API 请求前添加 `_logger.debug()` 打印完整请求 URL，便于排查
 - 删除 `print()` 调试代码
 
-### 4.3 日志使用方式
+### 4.4 日志使用方式
 
 ```python
 # 使用时 DEBUG 级别的 URL 记录会自动写入 logs/trader.log
