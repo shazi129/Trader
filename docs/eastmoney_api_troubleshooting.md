@@ -101,17 +101,34 @@ push2his.eastmoney.com        → ❌ RemoteDisconnected
 - **push2his**：仍然在 TLS 层 RST 断连，海外 IP 也不例外。
 - **其他域名**（quote / so / datacenter）一切正常。
 
-### 2.9 最终结论：全地域 JA4 TLS 指纹反爬
+### 2.9 修正结论：JA4 之外的路径级拦截
 
-东方财富已将反爬策略升级为**全地域覆盖**：
+回退到**国内直连**后，在浏览器中做了更精细的诊断：
 
-| 防护层级 | push2 (实时行情) | push2his (K线) |
-|---------|:---:|:---:|
-| TLS 指纹检测 | 可能（部分通过，改 HTTP 层拦截） | ✅ 严格 RST |
-| HTTP WAF | ✅ 502 Bad Gateway | — |
-| 覆盖范围 | 国内 + 海外 | 国内 + 海外 |
+| 端点 | 结果 |
+|------|:---:|
+| `push2.eastmoney.com` 根路径 | ✅ |
+| `/api/qt/stock/get` (实时行情) | ❌ **网络完全断开** |
+| `/api/qt/stock/trends2/get` (分时) | ✅ **JSONP 成功** |
+| `/api/qt/stock/kline/get` (K线) | ❌ RST |
 
-**非浏览器 HTTP 客户端在任何地区都无法稳定访问东方财富的 API 端点。** 这是系统性反爬升级，不是临时故障。
+关键发现：
+
+- `push2` 域名本身可访问（TCP/TLS 握手成功）
+- 同一域名下，**路径不同结果完全不同**：`get` 被断连，`trends2` 正常工作
+- 这推翻了单纯的「JA4 TLS 指纹反爬」结论——服务器在 **HTTP 路由层**针对特定 API 路径做了区分拦截
+
+### 2.10 最终结论：多层组合反爬
+
+东方财富的反爬是**多层级组合**：
+
+| 层 | 机制 | 影响 |
+|----|------|------|
+| TLS 指纹 | 非浏览器 TLS 栈 → RST | Python/curl 全挂 |
+| 路径过滤 | `/api/qt/stock/get` 被单独拦截 | 浏览器也访问不了 |
+| 海外 IP | 之前放行，后升级 | VPN 也失效 |
+
+**但也发现了突破口**：`trends2` 端点（分时数据）不受路径拦截，且确认支持 JSONP 回调。
 
 ## 3. 替代方案验证
 
@@ -124,18 +141,22 @@ push2his.eastmoney.com        → ❌ RemoteDisconnected
 
 ## 4. 处理措施
 
-### 4.1 当前方案：Sina API（已实施）
+### 4.1 当前方案：Sina API + 浏览器 Widget（已实施）
 
-在 `tools/stock_widget/config.json` 中将 `"api"` 从 `"eastmoney"` 改为 `"sina"`。
+- **Python 端**：`config.json` 中 `api` 保持 `"sina"`，稳定可靠。
+- **浏览器端**：`stock_widget.html` 使用 `trends2` 端点 + JSONP，**绕过所有反爬层**（浏览器原生 TLS + 非拦截路径）。
 
-> Sina API 对全部 5 只股票均正常工作，无需翻墙，无 TLS 指纹问题。
-> ~~VPN 海外节点方案已失效（东方财富全地域升级反爬）~~
+### 4.2 浏览器 Widget 原理
 
-### 4.2 如需恢复 eastmoney：唯一可靠方案
+```
+浏览器打开 stock_widget.html
+  → <script> 标签注入 JSONP 请求
+  → 浏览器原生 Chrome TLS 栈（JA4 天然通过）
+  → /api/qt/stock/trends2/get 端点（不被路径拦截）
+  → 分时数据解析 → 实时价格/涨跌幅/最高最低
+```
 
-Playwright/Selenium 驱动**真实 Chrome 浏览器**，用 `page.evaluate()` 执行 `fetch()` 发起 API 请求。真实浏览器的 TLS 指纹 100% 通过检测。
-
-> 其他模拟方案（curl_cffi / CycleTLS / tls_client）均不可靠——东方财富的反爬远超常规网站，需要系统级浏览器 TLS 栈。
+> 其他模拟方案（curl_cffi / CycleTLS / tls_client）均不可靠。
 
 ### 4.3 日志基础设施升级
 

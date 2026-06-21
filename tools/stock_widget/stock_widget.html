@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stock Widget</title>
+<style>
+    :root {
+        --bg: #0d1117;
+        --card-bg: rgba(22, 27, 34, 0.92);
+        --border: rgba(48, 54, 61, 0.7);
+        --text: #c9d1d9;
+        --text-dim: #8b949e;
+        --green: #26a641;
+        --red: #e5534b;
+        --gold: #d2991d;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', sans-serif;
+        display: flex; justify-content: center; align-items: flex-start;
+        min-height: 100vh; padding: 40px 16px;
+    }
+    .container { width: 100%; max-width: 520px; }
+
+    .header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 16px; padding: 0 4px;
+    }
+    .header h1 { font-size: 18px; font-weight: 600; }
+    .header .refresh-info { font-size: 12px; color: var(--text-dim); }
+    .header .refresh-info span { color: var(--text); font-variant-numeric: tabular-nums; }
+
+    .card {
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px 18px;
+        margin-bottom: 10px;
+        cursor: pointer;
+        transition: border-color 0.2s, background 0.2s;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        grid-template-rows: auto auto;
+        gap: 4px 12px;
+    }
+    .card:hover { border-color: rgba(88, 166, 255, 0.5); background: rgba(30, 36, 44, 0.95); }
+    .card.error { border-color: rgba(255, 123, 114, 0.4); }
+
+    .card .name { font-size: 14px; font-weight: 600; }
+    .card .code { font-size: 11px; color: var(--text-dim); margin-left: 6px; }
+
+    .card .price-area { text-align: right; grid-row: span 2; display: flex; flex-direction: column; justify-content: center; align-items: flex-end; }
+    .card .price { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
+    .card .change { font-size: 12px; font-weight: 500; margin-top: 2px; }
+    .card .change.up { color: var(--red); }
+    .card .change.down { color: var(--green); }
+    .card .change.flat { color: var(--text-dim); }
+
+    .card .info-row {
+        font-size: 11px; color: var(--text-dim);
+        display: flex; gap: 14px; flex-wrap: wrap;
+    }
+    .card .info-row span { white-space: nowrap; }
+
+    .card .error-msg { font-size: 12px; color: #f85149; grid-column: 1 / -1; }
+    .card.loading .price { animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    .status-bar {
+        margin-top: 14px; padding: 0 4px;
+        font-size: 11px; color: var(--text-dim);
+        display: flex; justify-content: space-between;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>📈 实时行情</h1>
+        <div class="refresh-info">刷新 <span id="countdown">--</span>s</div>
+    </div>
+    <div id="cards"></div>
+    <div class="status-bar">
+        <span id="updateTime">--</span>
+        <span>数据: 东方财富 trends2 · JSONP</span>
+    </div>
+</div>
+
+<script>
+// ============================================================================
+// 股票配置
+// ============================================================================
+const STOCKS = [
+    { key: 'Tencent',     name: '腾讯',     secid: '116.00700', dec: 2 },
+    { key: 'Tencent_Put', name: '腾讯-沽',   secid: '116.14136', dec: 2 },
+    { key: 'Alibaba',     name: '阿里-港',   secid: '116.09988', dec: 2 },
+    { key: 'NVIDIA',      name: '英伟达',    secid: '105.NVDA',  dec: 2 },
+    { key: 'AG',          name: '白银',      secid: '101.SI00Y', dec: 1 },
+];
+
+const REFRESH_INTERVAL = 60; // 秒
+const REQUEST_TIMEOUT  = 10; // 秒
+
+// trends2 端点（已验证 JSONP cb= 可用）
+const TRENDS2_URL    = 'https://push2.eastmoney.com/api/qt/stock/trends2/get';
+const TRENDS2_UT     = 'fa5fd1943c7b386f172d6893dbfba10b';
+const TRENDS2_FIELDS = 'f51,f52,f53,f54,f55,f56,f57,f58';
+
+// ============================================================================
+// 状态
+// ============================================================================
+const state = {
+    data: {},       // key -> quote object
+    errors: {},
+    countdown: REFRESH_INTERVAL,
+};
+
+// ============================================================================
+// JSONP 请求
+// ============================================================================
+function jsonpFetch(stock, cbName) {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        const tid = setTimeout(() => { cleanup(); reject(new Error('超时')); }, REQUEST_TIMEOUT * 1000);
+
+        function cleanup() {
+            clearTimeout(tid);
+            if (script.parentNode) script.remove();
+            delete window[cbName];
+        }
+
+        window[cbName] = (data) => { cleanup(); resolve(data); };
+        script.onerror = () => { cleanup(); reject(new Error('网络错误')); };
+
+        script.src = `${TRENDS2_URL}?secid=${stock.secid}&ndays=1&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9&fields2=${TRENDS2_FIELDS}&ut=${TRENDS2_UT}&cb=${cbName}`;
+        document.head.appendChild(script);
+    });
+}
+
+// ============================================================================
+// 数据解析
+// ============================================================================
+function parseQuote(raw, stock) {
+    if (!raw || !raw.data) return null;
+    const d = raw.data;
+
+    // trends 数组：每项 = "时间,价格,成交量,成交额,均价,..."
+    const trends = d.trends;
+    if (!Array.isArray(trends) || trends.length === 0) return null;
+
+    // 解析分时数据点
+    const points = [];
+    for (const row of trends) {
+        const parts = String(row).split(',');
+        if (parts.length < 3) continue;
+        const price = parseFloat(parts[1]);
+        const vol   = parseFloat(parts[2]) || 0;
+        const amt   = parseFloat(parts[3]) || 0;
+        if (isNaN(price) || price <= 0) continue;
+        points.push({ price, vol, amt });
+    }
+    if (points.length === 0) return null;
+
+    const last = points[points.length - 1].price;
+    const open = points[0].price;
+    let high = points[0].price;
+    let low  = points[0].price;
+    let totalVol = 0;
+    let totalAmt = 0;
+
+    for (const p of points) {
+        if (p.price > high) high = p.price;
+        if (p.price < low)  low  = p.price;
+        totalVol += p.vol;
+        totalAmt += p.amt;
+    }
+
+    // 昨收：优先 fields1 中的 f18（昨日收盘），否则用首笔价格估算
+    // 从 raw.data 中读 preClose / f18
+    const preCloseRaw = d.f18;  // 东方财富 trends2 metadata 中 f18=昨收
+    const preClose = preCloseRaw ? parseFloat(preCloseRaw) : open;
+
+    const changePct = preClose > 0 ? ((last - preClose) / preClose) * 100 : 0;
+    const changeAmt = last - preClose;
+
+    return {
+        name:      stock.name,
+        code:      d.code || stock.secid.split('.')[1] || '',
+        price:     last,
+        changePct: changePct,
+        changeAmt: changeAmt,
+        high:      high,
+        low:       low,
+        open:      open,
+        preClose:  preClose,
+        volume:    totalVol,
+        turnover:  totalAmt,
+        tickCount: points.length,
+    };
+}
+
+// ============================================================================
+// 渲染
+// ============================================================================
+function fmtPrice(n, dec) {
+    return n.toFixed(dec);
+}
+
+function fmtVol(n) {
+    if (n >= 1e8) return (n / 1e8).toFixed(2) + '亿';
+    if (n >= 1e4) return (n / 1e4).toFixed(0) + '万';
+    return Math.round(n).toString();
+}
+
+function render() {
+    const container = document.getElementById('cards');
+    let hasAny = false;
+
+    container.innerHTML = STOCKS.map(stock => {
+        const q = state.data[stock.key];
+        const err = state.errors[stock.key];
+
+        if (err && !q) {
+            return `<div class="card error">
+                <div><span class="name">${stock.name}</span><span class="code">${stock.secid}</span></div>
+                <div class="error-msg">${err}</div>
+            </div>`;
+        }
+        if (!q) {
+            return `<div class="card loading">
+                <div><span class="name">${stock.name}</span><span class="code">${stock.secid}</span></div>
+                <div class="price-area"><div class="price">--</div><div class="change flat">加载中</div></div>
+            </div>`;
+        }
+
+        hasAny = true;
+        const pct = q.changePct;
+        const dir = pct > 0.005 ? 'up' : (pct < -0.005 ? 'down' : 'flat');
+        const sign = pct > 0.005 ? '+' : '';
+        const dec = stock.dec;
+
+        return `<div class="card" data-key="${stock.key}">
+            <div>
+                <span class="name">${stock.name}</span>
+                <span class="code">${q.code}</span>
+            </div>
+            <div class="price-area">
+                <div class="price">${fmtPrice(q.price, dec)}</div>
+                <div class="change ${dir}">${sign}${pct.toFixed(2)}%  ${sign}${q.changeAmt.toFixed(dec)}</div>
+            </div>
+            <div class="info-row">
+                <span>开 ${fmtPrice(q.open, dec)}</span>
+                <span>高 ${fmtPrice(q.high, dec)}</span>
+                <span>低 ${fmtPrice(q.low, dec)}</span>
+                <span>昨收 ${fmtPrice(q.preClose, dec)}</span>
+                ${q.volume ? `<span>量 ${fmtVol(q.volume)}手</span>` : ''}
+                <span>${q.tickCount}笔</span>
+            </div>
+        </div>`;
+    }).join('');
+
+    if (hasAny) {
+        document.getElementById('updateTime').textContent =
+            '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    }
+}
+
+// ============================================================================
+// 刷新逻辑
+// ============================================================================
+let fetchId = 0;
+
+async function refreshAll() {
+    const myId = ++fetchId;
+
+    const tasks = STOCKS.map(async (stock, idx) => {
+        const cbName = '_cb_' + myId + '_' + idx;
+        try {
+            const raw = await jsonpFetch(stock, cbName);
+            if (myId !== fetchId) return;
+            const q = parseQuote(raw, stock);
+            if (q) {
+                state.data[stock.key] = q;
+                delete state.errors[stock.key];
+            } else {
+                if (!state.errors[stock.key]) state.errors[stock.key] = '数据解析失败';
+            }
+        } catch (e) {
+            if (myId !== fetchId) return;
+            // 保留旧数据
+            if (!state.data[stock.key]) state.errors[stock.key] = e.message;
+        }
+    });
+
+    await Promise.allSettled(tasks);
+    if (myId !== fetchId) return;
+
+    render();
+    resetCountdown();
+}
+
+// ============================================================================
+// 倒计时
+// ============================================================================
+function resetCountdown() {
+    state.countdown = REFRESH_INTERVAL;
+    document.getElementById('countdown').textContent = state.countdown;
+}
+
+let cdTimer = null;
+function startCountdown() {
+    cdTimer = setInterval(() => {
+        state.countdown--;
+        document.getElementById('countdown').textContent = state.countdown;
+        if (state.countdown <= 0) refreshAll();
+    }, 1000);
+}
+
+// ============================================================================
+// 启动
+// ============================================================================
+function init() {
+    render();
+    refreshAll();
+    setInterval(refreshAll, REFRESH_INTERVAL * 1000);
+    startCountdown();
+
+    // 点击卡片打印详情到控制台
+    document.getElementById('cards').addEventListener('click', (e) => {
+        const card = e.target.closest('.card');
+        if (!card) return;
+        const key = card.dataset.key;
+        if (state.data[key]) console.log(key, state.data[key]);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
