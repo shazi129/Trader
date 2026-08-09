@@ -1,17 +1,4 @@
 {
     "api": "eastmoney",
-    "db_path": null,
-    "schedule_time": "17:30",
-    "stocks": [
-        {
-            "name_key": "Tencent",
-            "earliest_date": null,
-            "enabled": true
-        },
-        {
-            "name_key": "Alibaba",
-            "earliest_date": null,
-            "enabled": true
-        }
-    ]
+    "schedule_time": "17:30"
 }

@@ -3,12 +3,12 @@
 
 行为概述
 --------
-1. 从配置文件 ``config.json`` 读取要拉取的股票列表与全局参数；
+1. 自动从 ``STOCK_META`` 获取全部股票列表，按 ``config.json`` 的 ``exclude``
+   字段排除不需要的股票；
 2. 对每只股票：
    - 从数据库 ``kline_daily`` 表查 ``get_latest_date(name_key)``：
      * 若已有记录 → 从 **最新日期 + 1 天** 开始拉（增量补齐）；
-     * 若无记录 → 从 ``task.earliest_date`` 起拉，未配则回落到
-       ``StockInfo.listing_date``（不再有"全局 earliest_date"）；
+     * 若无记录 → 从 ``StockInfo.listing_date`` 起拉；
    - 按个股 ``StockInfo.market`` 判定今日是否已收盘（A 股 15:00 / 港股 16:00 /
      美股美东 16:00）。**今天未收盘则 end_date 回退到最近工作日**，避免把盘中
      不完整的"伪日 K"写进数据库；
@@ -26,11 +26,22 @@
 - **守护**：``python tools/kline_fetcher/kline_fetcher.py daemon``
   每天到 ``schedule_time`` 自动跑一次，无需 cron / 任务计划程序。
 
+单股票操作
+----------
+- **补全历史**：``python tools/kline_fetcher/kline_fetcher.py fill Tencent``
+  从 listing_date 拉到今天。
+- **最近 N 天**：``python tools/kline_fetcher/kline_fetcher.py recent Tencent -n 60``
+  强制拉取最近 N 天数据（默认 30）。
+- **删除 K 线**：``python tools/kline_fetcher/kline_fetcher.py delete Tencent``
+  删除该股票在 kline_daily 表中的全部记录。
+
 设计取舍
 --------
 - 不依赖 ``schedule`` / ``APScheduler`` 等三方包：用最朴素的"算下一次时间 → sleep
   → 跑"循环，零依赖、Windows/Linux 都能跑。
 - DB / API 都走项目已有抽象（``StockDB`` + ``QuoteAPIFactory``），不重复造轮子。
+- 股票列表不再手动维护，直接读取 ``STOCK_META`` 全量，新增股票只需在
+  ``quote_api/stock_meta.py`` 加一行。
 """
 
 from __future__ import annotations
@@ -55,7 +66,7 @@ if str(_ROOT) not in sys.path:
 from database.stock_db_utils import StockDB  # noqa: E402
 from quantitative.factor_batch import compute_and_save_factors  # noqa: E402
 from quote_api import QuoteAPIFactory  # noqa: E402
-from quote_api.stock_meta import StockMarket, get_meta  # noqa: E402
+from quote_api.stock_meta import StockMarket, all_keys, get_meta  # noqa: E402
 from utils.logger import get_logger  # noqa: E402
 
 try:
@@ -74,44 +85,24 @@ DEFAULT_CONFIG_PATH = _THIS_DIR / "config.json"
 # 配置载入
 # ---------------------------------------------------------------------------
 @dataclass
-class StockTask:
-    name_key: str
-    earliest_date: Optional[str]      # 该股票自己的最早起始日（覆盖全局）
-    enabled: bool
-
-
-@dataclass
 class FetcherConfig:
     api_name: str
-    db_path: Optional[str]
     schedule_time: str                # "HH:MM"
-    stocks: list[StockTask]
+    exclude: list[str]                # 排除的 name_key（不拉取）
 
 
 def load_config(path: Path) -> FetcherConfig:
     with open(path, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
-    stocks_raw = raw.get("stocks") or []
-    stocks: list[StockTask] = []
-    for item in stocks_raw:
-        if isinstance(item, str):
-            # 简写：直接给 name_key 字符串
-            stocks.append(StockTask(name_key=item, earliest_date=None, enabled=True))
-        elif isinstance(item, dict):
-            stocks.append(StockTask(
-                name_key=str(item["name_key"]),
-                earliest_date=item.get("earliest_date") or None,
-                enabled=bool(item.get("enabled", True)),
-            ))
-        else:
-            _log.warning("跳过非法的 stocks 配置项: %r", item)
+    exclude = raw.get("exclude") or []
+    if not isinstance(exclude, list):
+        exclude = []
 
     return FetcherConfig(
         api_name=str(raw.get("api", "eastmoney")),
-        db_path=raw.get("db_path") or None,
         schedule_time=str(raw.get("schedule_time", "17:30")),
-        stocks=stocks,
+        exclude=[str(k) for k in exclude],
     )
 
 
@@ -201,76 +192,73 @@ def _resolve_end_date(name_key: str, today: datetime.date) -> str:
     return end.strftime("%Y-%m-%d")
 
 
-def _resolve_start_date(db: StockDB, task: StockTask) -> Optional[str]:
+def _resolve_start_date(db: StockDB, name_key: str) -> Optional[str]:
     """决定起始拉取日期。
 
-    优先级：DB 最新日期 +1 > task.earliest_date > StockInfo.listing_date。
+    优先级：DB 最新日期 +1 > StockInfo.listing_date。
     全部为空时返回 None，让上游 / 缓存层按其默认起点处理。
     """
-    latest = db.get_latest_date(task.name_key)
+    latest = db.get_latest_date(name_key)
     if latest:
         return _next_day(latest)
 
-    if task.earliest_date:
-        return task.earliest_date
-
-    meta = get_meta(task.name_key)
+    meta = get_meta(name_key)
     if meta and meta.listing_date:
         return meta.listing_date
 
     return None
 
 
-def fetch_one(api, db: StockDB, task: StockTask, cfg: FetcherConfig,
+def fetch_one(api, db: StockDB, name_key: str, cfg: FetcherConfig,
               today: datetime.date) -> tuple[bool, int, str]:
     """拉取并入库单只股票。
 
     :return: (是否成功, 新增条数, 起始日期)
     """
-    start = _resolve_start_date(db, task)
-    end = _resolve_end_date(task.name_key, today)
+    start = _resolve_start_date(db, name_key)
+    end = _resolve_end_date(name_key, today)
 
     if start and start > end:
         _log.info("[%s] 已是最新或当日未收盘（start=%s, end=%s），跳过",
-                  task.name_key, start, end)
+                  name_key, start, end)
         return True, 0, start
 
     try:
         # 走 cached_api：内部按区间补齐 + 自动分批拉上游，
         # 调用方不需要再关心"limit / 单次最大窗口"。
-        quotes = api.get_klines(task.name_key, start_date=start, end_date=end)
+        quotes = api.get_klines(name_key, start_date=start, end_date=end)
     except Exception as e:
-        _log.error("[%s] 拉取失败: %s", task.name_key, e)
+        _log.error("[%s] 拉取失败: %s", name_key, e)
         return False, 0, start or ""
 
     if not quotes:
         _log.info("[%s] 区间 %s ~ %s 无新数据",
-                  task.name_key, start or "<listing>", end)
+                  name_key, start or "<listing>", end)
         return True, 0, start or ""
 
     # cached_api 已在内部完成入库；这里只统计区间内的总条数（含已存量）。
     # 真正的"新增条数"由 cached_api 的日志输出，本函数无需再写一遍 DB。
     _log.info("[%s] 当前区间共 %d 条 (%s ~ %s)",
-              task.name_key, len(quotes), quotes[0].date, quotes[-1].date)
+              name_key, len(quotes), quotes[0].date, quotes[-1].date)
 
     # K 线已写库 → 同步刷新因子表，保证 kline_daily 和 factor_indicator
     # 的最新日期一致（stock_advisor._load_or_build 用这个判等来决定是否重算）。
     # 失败不影响本次 K 线拉取结果：因子下次跑分析时还会被 _load_or_build 兜底重算。
     try:
         ok_fac = compute_and_save_factors(
-            task.name_key,
+            name_key,
             api_name=cfg.api_name,
-            db_path=cfg.db_path,
+            db_path=None,
             limit=None,  # 不再限制条数，让因子用全量数据
             force_refresh=False,
         )
         if ok_fac:
-            _log.info("[%s] 因子表已同步", task.name_key)
+            _log.info("[%s] 因子表已同步", name_key)
         else:
-            _log.warning("[%s] 因子计算返回失败，跳过", task.name_key)
+            _log.warning("[%s] 因子计算返回失败，跳过", name_key)
     except Exception as e:
         _log.error("[%s] 因子计算异常（不影响 K 线入库结果）: %s",
-                   task.name_key, e)
+                   name_key, e)
 
     return True, len(quotes), start or ""
 
@@ -280,15 +268,16 @@ def run_once(config_path: Path = DEFAULT_CONFIG_PATH) -> int:
     cfg = load_config(config_path)
     today = datetime.date.today()
 
-    enabled = [t for t in cfg.stocks if t.enabled]
-    if not enabled:
-        _log.warning("配置中没有任何启用的股票，结束")
+    # 直接从 STOCK_META 获取全量股票，按 exclude 过滤
+    exclude_set = set(cfg.exclude)
+    names = [k for k in all_keys() if k not in exclude_set]
+    if not names:
+        _log.warning("没有可拉取的股票（STOCK_META 为空或全部被排除），结束")
         return 0
 
     _log.info("=" * 60)
-    _log.info("开始拉取 K 线: api=%s, db=%s, today=%s, 共 %d 只",
-              cfg.api_name, cfg.db_path or "<default>",
-              today.strftime("%Y-%m-%d"), len(enabled))
+    _log.info("开始拉取 K 线: api=%s, today=%s, 共 %d 只",
+              cfg.api_name, today.strftime("%Y-%m-%d"), len(names))
     _log.info("=" * 60)
 
     # 统一走 cached_api：内部按区间补齐 + 自动分批拉上游 + 自动写库。
@@ -299,9 +288,9 @@ def run_once(config_path: Path = DEFAULT_CONFIG_PATH) -> int:
     fail_cnt = 0
     total_rows = 0
 
-    with closing(StockDB(cfg.db_path)) as db:
-        for task in enabled:
-            ok, rows, _ = fetch_one(api, db, task, cfg, today)
+    with closing(StockDB()) as db:
+        for name_key in names:
+            ok, rows, _ = fetch_one(api, db, name_key, cfg, today)
             if ok:
                 ok_cnt += 1
                 total_rows += rows
@@ -371,18 +360,128 @@ def run_daemon(config_path: Path = DEFAULT_CONFIG_PATH,
 
 
 # ---------------------------------------------------------------------------
+# 单股票操作模式
+# ---------------------------------------------------------------------------
+def run_fill(symbol: str, config_path: Path = DEFAULT_CONFIG_PATH) -> int:
+    """补全某只股票的全部历史 K 线（从 listing_date 拉到今天）。"""
+    cfg = load_config(config_path)
+    today = datetime.date.today()
+
+    _log.info("=" * 60)
+    _log.info("补全 [%s] 全部历史 K 线: api=%s", symbol, cfg.api_name)
+    _log.info("=" * 60)
+
+    api = QuoteAPIFactory.create_with_cache(cfg.api_name)
+    with closing(StockDB()) as db:
+        ok, rows, start = fetch_one(api, db, symbol, cfg, today)
+        if not ok:
+            _log.error("[%s] 补全失败", symbol)
+            return 1
+        _log.info("[%s] 补全完成，起始日期 %s，共 %d 条", symbol, start, rows)
+    return 0
+
+
+def run_recent(symbol: str, days: int, config_path: Path = DEFAULT_CONFIG_PATH) -> int:
+    """拉某只股票最近 N 天的 K 线（强制从 N 天前开始拉）。"""
+    cfg = load_config(config_path)
+    today = datetime.date.today()
+
+    _log.info("=" * 60)
+    _log.info("拉取 [%s] 最近 %d 天 K 线: api=%s", symbol, days, cfg.api_name)
+    _log.info("=" * 60)
+
+    api = QuoteAPIFactory.create_with_cache(cfg.api_name)
+    with closing(StockDB()) as db:
+        # 最近 N 天：end_date 按正常收盘逻辑，start_date 从 end 往前推 days 天
+        end = _resolve_end_date(symbol, today)
+        start_d = datetime.datetime.strptime(end, "%Y-%m-%d").date()
+        start_d -= datetime.timedelta(days=days)
+        start = start_d.strftime("%Y-%m-%d")
+
+        try:
+            quotes = api.get_klines(symbol, start_date=start, end_date=end)
+        except Exception as e:
+            _log.error("[%s] 拉取失败: %s", symbol, e)
+            return 1
+
+        if not quotes:
+            _log.info("[%s] 区间 %s ~ %s 无数据", symbol, start, end)
+            return 0
+
+        _log.info("[%s] 拉取完成: %d 条 (%s ~ %s)",
+                  symbol, len(quotes), quotes[0].date, quotes[-1].date)
+
+        # 同步因子
+        try:
+            compute_and_save_factors(
+                symbol, api_name=cfg.api_name, db_path=None,
+                limit=None, force_refresh=False,
+            )
+            _log.info("[%s] 因子表已同步", symbol)
+        except Exception as e:
+            _log.warning("[%s] 因子计算异常: %s", symbol, e)
+    return 0
+
+
+def run_delete(symbol: str, config_path: Path = DEFAULT_CONFIG_PATH) -> int:
+    """删除某只股票的所有 K 线。"""
+    _log.info("=" * 60)
+    _log.info("删除 [%s] 的全部 K 线", symbol)
+    _log.info("=" * 60)
+
+    with closing(StockDB()) as db:
+        deleted = db.delete_by_symbol(symbol)
+        if deleted == 0:
+            _log.info("[%s] 没有 K 线记录，无需删除", symbol)
+        else:
+            _log.info("[%s] 已删除 %d 条 K 线记录", symbol, deleted)
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 def main() -> int:
     parser = argparse.ArgumentParser(description="定时增量拉取日 K 线入库")
-    parser.add_argument("mode", nargs="?", default="run",
-                        choices=["run", "daemon"],
-                        help="run = 立即跑一次；daemon = 每日定时执行")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
+    sub = parser.add_subparsers(dest="mode", help="运行模式")
+
+    # ---- run -----------------------------------------------------------
+    p_run = sub.add_parser("run", help="拉取所有股票增量 K 线")
+    p_run.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
+                       help="配置文件路径")
+
+    # ---- daemon --------------------------------------------------------
+    p_daemon = sub.add_parser("daemon", help="每日定时执行")
+    p_daemon.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
+                          help="配置文件路径")
+    p_daemon.add_argument("--run-on-start", action="store_true",
+                          help="启动时先跑一次")
+
+    # ---- fill ----------------------------------------------------------
+    p_fill = sub.add_parser("fill", help="补全某只股票全部历史 K 线")
+    p_fill.add_argument("symbol", help="name_key，如 Tencent")
+    p_fill.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
                         help="配置文件路径")
-    parser.add_argument("--run-on-start", action="store_true",
-                        help="daemon 模式：启动时先跑一次")
+
+    # ---- recent --------------------------------------------------------
+    p_recent = sub.add_parser("recent", help="拉某只股票最近 N 天 K 线")
+    p_recent.add_argument("symbol", help="name_key，如 Tencent")
+    p_recent.add_argument("-n", "--days", type=int, default=30,
+                          help="拉取最近多少天（默认 30）")
+    p_recent.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
+                          help="配置文件路径")
+
+    # ---- delete --------------------------------------------------------
+    p_delete = sub.add_parser("delete", help="删除某只股票的所有 K 线")
+    p_delete.add_argument("symbol", help="name_key，如 Tencent")
+    p_delete.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
+                          help="配置文件路径")
+
     args = parser.parse_args()
+
+    if args.mode is None:
+        parser.print_help()
+        return 0
 
     config_path = Path(args.config)
     if not config_path.exists():
@@ -391,8 +490,16 @@ def main() -> int:
 
     if args.mode == "run":
         return run_once(config_path)
-    else:
+    elif args.mode == "daemon":
         return run_daemon(config_path, run_on_start=args.run_on_start)
+    elif args.mode == "fill":
+        return run_fill(args.symbol, config_path)
+    elif args.mode == "recent":
+        return run_recent(args.symbol, args.days, config_path)
+    elif args.mode == "delete":
+        return run_delete(args.symbol, config_path)
+    else:
+        return 1
 
 
 if __name__ == "__main__":
