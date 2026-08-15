@@ -37,7 +37,7 @@
                                 v
         +---------------------------------------------------------+
         |                      数据源                              |
-        |  quote_api/eastmoney   tencent   sina                    |
+        |  quote_api/eastmoney   futu   tencent   sina             |
         |  统一基类: QuoteAPI / DailyQuote / StockFundamental       |
         +---------------------------------------------------------+
 ```
@@ -51,7 +51,7 @@
 
 - **`QuoteAPI`**（`quote_base.py`）：抽象基类，定义 `get_klines / get_daily_quote /
   get_fundamentals` 三个接口。
-- **三家实现**：`eastmoney/` / `tencent/` / `sina/`，每家自带 `config.json`
+- **多源实现**：`eastmoney/` / `futu/` / `tencent/` / `sina/`，每家自带 `config.json`
   保存 `name_key → 真实代码` 映射，作为「这个数据源支持哪些股票」的权威清单。
 - **`QuoteAPIFactory`**（`quote_factory.py`）：
   - 按 source 字符串/枚举创建实现实例；

@@ -19,6 +19,7 @@ from typing import Optional
 
 from quote_api.quote_base import QuoteAPI
 from quote_api.eastmoney import EastMoneyQuoteAPI
+from quote_api.futu import FutuQuoteAPI
 from quote_api.tencent import TencentQuoteAPI
 from quote_api.sina import SinaQuoteAPI
 from quote_api.cached_api import CachedQuoteAPI
@@ -27,6 +28,7 @@ from quote_api.cached_api import CachedQuoteAPI
 class QuoteSource(str, Enum):
     """支持的数据源枚举"""
     EASTMONEY = "eastmoney"
+    FUTU = "futu"
     TENCENT = "tencent"
     SINA = "sina"
 
@@ -44,6 +46,7 @@ class QuoteAPIFactory:
 
     _REGISTRY: dict[str, type[QuoteAPI]] = {
         QuoteSource.EASTMONEY.value: EastMoneyQuoteAPI,
+        QuoteSource.FUTU.value: FutuQuoteAPI,
         QuoteSource.TENCENT.value: TencentQuoteAPI,
         QuoteSource.SINA.value: SinaQuoteAPI,
     }
@@ -86,8 +89,12 @@ class QuoteAPIFactory:
         """允许外部扩展新的数据源"""
         cls._REGISTRY[source] = impl
         # 注册时清掉同名旧缓存，避免读到过期实现
-        cls._RAW_INSTANCES.pop(source, None)
-        cls._CACHED_INSTANCES.pop(source, None)
+        cached = cls._CACHED_INSTANCES.pop(source, None)
+        if cached is not None:
+            cached.close()
+        raw = cls._RAW_INSTANCES.pop(source, None)
+        if raw is not None:
+            raw.close()
 
     # ------------------------------------------------------------------
     @classmethod
@@ -123,11 +130,16 @@ class QuoteAPIFactory:
     # ------------------------------------------------------------------
     @classmethod
     def clear_cache(cls) -> None:
-        """释放所有缓存的实例（CachedQuoteAPI 会关闭其 DB 连接）。"""
+        """释放所有缓存实例及其 DB / 上游连接。"""
         for inst in cls._CACHED_INSTANCES.values():
             try:
                 inst.close()
             except Exception:
                 pass
         cls._CACHED_INSTANCES.clear()
+        for inst in cls._RAW_INSTANCES.values():
+            try:
+                inst.close()
+            except Exception:
+                pass
         cls._RAW_INSTANCES.clear()

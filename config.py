@@ -8,7 +8,7 @@ from enum import Enum
 # 业务层无需修改。新增/调整股票请编辑 quote_api/stock_meta.py。
 from quote_api.stock_meta import STOCK_META as global_stock_list  # noqa: F401
 
-# 行情数据源: "eastmoney" | "tencent" | "sina"
+# 行情数据源: "eastmoney" | "futu" | "tencent" | "sina"
 QUOTE_SOURCE: str = "eastmoney"
 
 

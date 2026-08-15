@@ -46,12 +46,12 @@
 Trader/
 ├── main.py                       # PySide6 GUI 启动入口
 ├── config.py                     # 全局配置：数据源、事件枚举
-├── quote_api/                    # 行情数据源统一抽象层（三家实现 + 缓存包装）
+├── quote_api/                    # 行情数据源统一抽象层（多源实现 + 缓存包装）
 │   ├── quote_base.py             # QuoteAPI 基类、DailyQuote/StockFundamental
 │   ├── quote_factory.py          # QuoteAPIFactory（含进程级单例）
 │   ├── cached_api.py             # CachedQuoteAPI 旁路缓存
 │   ├── stock_meta.py             # STOCK_META 全项目股票清单
-│   ├── eastmoney/ tencent/ sina/ # 三家具体实现 + 各自 config.json
+│   ├── eastmoney/ futu/ tencent/ sina/ # 具体实现 + 各自 config.json
 ├── quantitative/                 # 量化分析三层
 │   ├── indicators/               # 纯函数指标原语（SMA/EMA/RSI/KDJ/ADX/...）
 │   ├── factors/                  # KlineIndicator 字段 dataclass（6 mixin）
@@ -144,7 +144,7 @@ python tools/stock_widget/stock_widget.py
 
 | 位置 | 字段 | 说明 |
 |---|---|---|
-| `config.py` | `QUOTE_SOURCE` | 默认行情源：`"eastmoney"` / `"tencent"` / `"sina"` |
+| `config.py` | `QUOTE_SOURCE` | 默认行情源：`"eastmoney"` / `"futu"` / `"tencent"` / `"sina"` |
 | `quote_api/stock_meta.py` | `STOCK_META` | 全项目股票清单（`name_key → StockInfo`） |
 | `quote_api/<src>/config.json` | `stocks` 映射 | 该数据源支持的 `name_key → 真实代码` |
 | `tools/kline_fetcher/config.json` | `api / db_path / earliest_date / schedule_time / stocks` | 抓取行为 |

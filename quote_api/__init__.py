@@ -6,6 +6,7 @@
 - 新浪财经   (sina)
 - 腾讯财经   (tencent)
 - 东方财富   (eastmoney)
+- 富途 OpenAPI (futu，需要运行 OpenD)
 
 使用示例：
     from quote_api import QuoteAPIFactory
@@ -22,6 +23,7 @@
 from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, StockFundamental
 from quote_api.quote_factory import QuoteAPIFactory, QuoteSource
 from quote_api.cached_api import CachedQuoteAPI
+from quote_api.futu import FutuQuoteAPI, FutuQuoteError
 from quote_api.stock_meta import (
     STOCK_META,
     StockInfo,
@@ -40,6 +42,8 @@ __all__ = [
     "QuoteAPIFactory",
     "QuoteSource",
     "CachedQuoteAPI",
+    "FutuQuoteAPI",
+    "FutuQuoteError",
     "STOCK_META",
     "StockInfo",
     "StockMarket",
