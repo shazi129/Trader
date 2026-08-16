@@ -1,4 +1,5 @@
 {
+    "api": "sina",
     "stocks": [
         "Tencent",
         "Tencent_Put",
@@ -6,7 +7,7 @@
         "AG",
         "NVIDIA"
     ],
-    "active": "NVIDIA",
+    "active": "Tencent",
     "refresh_interval": 60,
     "opacity": 0.75,
     "font_size": 12,

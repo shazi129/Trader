@@ -8,6 +8,7 @@ Windows 11 浮空股票报价小控件 (PySide6)
 
 import sys
 import json
+import signal
 from pathlib import Path
 from typing import Optional
 
@@ -499,6 +500,18 @@ class StockWidget(QWidget):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
+    # Ctrl+C 优雅退出：把 SIGINT 转发成 Qt 的 quit()，避免 KeyboardInterrupt
+    # 被事件循环抛到 mousePressEvent 等处理器里，打印误导性 traceback。
+    try:
+        signal.signal(signal.SIGINT, lambda *_: app.quit())
+    except (ValueError, OSError):
+        pass  # 非主线程无法设置 signal，忽略即可
+
     widget = StockWidget()
     widget.show()
-    sys.exit(app.exec())
+
+    try:
+        sys.exit(app.exec())
+    except KeyboardInterrupt:
+        sys.exit(0)
