@@ -49,7 +49,7 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from database.stock_db_utils import StockDB  # noqa: E402
-from quote_api.financial import (  # noqa: E402
+from financial_reports import (  # noqa: E402
     ParserFactory,
     FinancialReport,
     ParserError,

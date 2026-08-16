@@ -17,7 +17,7 @@
    stock_info.py，已合并进来），确保整个 quote_api 域的类型自洽。
 
 新增/调整股票时：
-- 默认情况：在这里改 STOCK_META 即可，3 家数据源自动支持。
+- 默认情况：在这里改 STOCK_META 即可，各已注册数据源自动支持。
 - 某源不支持：在该源的 config.json 加 ``"name_key": ""``。
 - 某源代码不同：在该源的 config.json 加 ``"name_key": "<该源专用 code>"``。
 """

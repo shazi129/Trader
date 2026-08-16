@@ -3,7 +3,7 @@ Windows 11 浮空股票报价小控件 (PySide6)
 - 极简到极致：仅显示价格
 - 半透明、无边框、置顶、可拖动
 - 右键菜单退出/刷新/打开配置/切换股票/切换数据源
-- 支持多种行情数据源（腾讯财经 / 东方财富 / 新浪财经）
+- 支持 ``QuoteAPIFactory`` 中注册的行情数据源
 """
 
 import sys
@@ -19,6 +19,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QLabel, QMenu
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QPoint
 from PySide6.QtGui import QFont, QAction, QCursor
+from quote_api import QuoteAPIFactory
 
 # ---------------------------------------------------------------------------
 # 配置
@@ -26,10 +27,9 @@ from PySide6.QtGui import QFont, QAction, QCursor
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
-# 支持的数据源。顺序决定菜单中的排列顺序。
-# 注意：sina 仅稳定支持 A 股（实时+K 线）；港股只有实时快照、没有历史 K 线。
-SUPPORTED_APIS = ("tencent", "eastmoney", "sina")
-DEFAULT_API = "tencent"
+# 数据源列表和默认值由统一工厂提供，浮窗不维护第二份 provider 名单。
+SUPPORTED_APIS = tuple(QuoteAPIFactory.available_sources())
+DEFAULT_API = QuoteAPIFactory.current_source()
 
 # 展示模式
 DISP_PRICE_CHANGE = "price_change"    # 默认：价格|涨跌额，如 440.20|-5.20
@@ -153,7 +153,7 @@ class FetchThread(QThread):
     """
     完全通过 quote_api.QuoteAPIFactory 统一取数，不对任何数据源做特殊分支。
     - 优先调 get_daily_quote(name_key, date=None)，各源可走各自最实时的通道
-      （如 tencent 会走 qt.gtimg.cn 实时接口；其它源取最近一根日K）。
+      若实时快照缺少昨收，则回退到最近两根日 K 线补齐。
     - 若拿不到 pre_close，则再取最近两根日K，用上一根 close 作为昨收计算涨跌。
     """
     result_ready = Signal(object)  # DailyQuote | str("UNSUPPORTED") | None

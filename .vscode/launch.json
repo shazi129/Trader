@@ -6,13 +6,6 @@
     "configurations": [
 
         {
-            "name": "main.py",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/main.py",
-            "console": "integratedTerminal"
-        },
-        {
             "name": "Current File",
             "type": "debugpy",
             "request": "launch",

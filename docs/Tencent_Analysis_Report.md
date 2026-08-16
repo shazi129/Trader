@@ -201,8 +201,7 @@ python quantitative/factor_batch.py --stock Tencent --limit 640 --force-refresh
 
 ### 重新分析
 ```bash
-cd h:\GitHub\Trader
-python test/analyze_tencent.py > docs/Tencent_Analysis_Report.md
+python -m tools.stock_advisor.stock_advisor Tencent
 ```
 
 ### 更新数据

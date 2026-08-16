@@ -364,7 +364,7 @@ class StockDB:
     def write_financial_report(self, report) -> None:
         """写入一份 ``FinancialReport``（INSERT OR REPLACE 幂等）。
 
-        :param report: ``quote_api.financial.FinancialReport`` 实例
+        :param report: ``financial_reports.FinancialReport`` 实例
         """
         cols = self._financial_columns
         row = {

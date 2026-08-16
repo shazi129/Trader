@@ -1,15 +1,15 @@
 # 工程架构
 
-> 一句话：**数据源 → 缓存 → 存储 → 因子 → 信号/回测 → 前端（GUI / CLI 报告 / 浮窗）**。
+> 一句话：**数据源 → 缓存 → 存储 → 因子 → 信号/回测 → CLI 报告 / 独立报价浮窗**。
 > 每一层只依赖下一层，且替换上层不需要改下层。
 
 ## 总览
 
 ```
         +---------------------------------------------------------+
-        |                       前端 / 入口                        |
-        |  ui/ (PySide6)   tools/stock_advisor   tools/stock_widget|
-        |  main.py         quantitative.quant_analyzer (CLI)       |
+        |                           入口                             |
+        |  tools/stock_advisor       tools/kline_fetcher             |
+        |  quantitative.* (CLI)      tools/stock_widget (独立浮窗)   |
         +-----------------------+---------------------------------+
                                 |
                                 v
@@ -37,13 +37,13 @@
                                 v
         +---------------------------------------------------------+
         |                      数据源                              |
-        |  quote_api/eastmoney   futu   tencent   sina             |
+        |  quote_api/<provider>（由 Factory 注册表动态发现）       |
         |  统一基类: QuoteAPI / DailyQuote / StockFundamental       |
         +---------------------------------------------------------+
 ```
 
-依赖方向严格自上而下，**不允许下层回调上层**（`config.py` 里只剩个数据源
-开关 + 事件枚举，连股票清单都下沉到了 `quote_api/stock_meta.py`）。
+依赖方向严格自上而下，**不允许下层回调上层**（`config.py` 里只保留默认
+数据源和兼容导出，股票清单下沉到了 `quote_api/stock_meta.py`）。
 
 ## 各层职责详解
 
@@ -51,7 +51,8 @@
 
 - **`QuoteAPI`**（`quote_base.py`）：抽象基类，定义 `get_klines / get_daily_quote /
   get_fundamentals` 三个接口。
-- **多源实现**：`eastmoney/` / `futu/` / `tencent/` / `sina/`，每家自带 `config.json`
+- **多源实现**：每个 `quote_api/<provider>/` 自带 `config.json`；具体名单调用
+  `QuoteAPIFactory.available_sources()` 获取
   保存 `name_key → 真实代码` 映射，作为「这个数据源支持哪些股票」的权威清单。
 - **`QuoteAPIFactory`**（`quote_factory.py`）：
   - 按 source 字符串/枚举创建实现实例；
@@ -108,13 +109,12 @@
 两节方向相反是正常的——比如当前超卖（第 1 节偏空），但历史上每次跌到此位
 后多数反弹（第 2 节偏多），这是均值回归。
 
-### 5. 前端入口
+### 5. 入口
 
-- **PySide6 GUI**（`main.py` + `ui/`）：主窗口、比值图、更新按钮等；
-  绘图基于 `pyqtgraph`。
 - **CLI**：`quantitative.quant_analyzer` / `quantitative.factor_batch` /
   `tools.stock_advisor.stock_advisor` / `tools/kline_fetcher/kline_fetcher.py`。
-- **桌面浮窗**：`tools/stock_widget/`，PySide6 + 半透明无边框窗口。
+- **独立报价浮窗**：`tools/stock_widget/`，只依赖行情抽象层，不依赖已移除的
+  `main.py` 和 `ui/` 主窗口。
 
 ## 关键数据流
 

@@ -24,16 +24,17 @@ tools/financial_fetcher/
 └── 茅台/                   # A 股季报 PDF（解析器未实现）
 ```
 
-解析器 / 数据模型代码位于 `quote_api/financial/`：
+解析器 / 数据模型代码位于根级领域包 `financial_reports/`：
 
 ```
-quote_api/financial/
-├── financial_base.py       # FinancialReport dataclass + FinancialParser 抽象基类
+financial_reports/
+├── models.py               # FinancialReport dataclass
+├── parser_base.py          # FinancialParser 抽象基类 + ParserError
 ├── field_mapping.py        # 港股科目名（繁/简）→ 统一字段名
 ├── parser_factory.py       # 按 PDF 内容自动选解析器
 └── parsers/
     ├── _utils.py           # 中文日期 / 数字单元格 / 报告期类型 通用工具
-    └── pdf_hk_ifrs.py      # 港股 IFRS 解析器
+    └── hk_ifrs.py          # 港股 IFRS 解析器
 ```
 
 ---

@@ -15,7 +15,7 @@ cd D:\GitHub\Trader
 python -m tools.stock_advisor.stock_advisor Tencent
 
 # 自定义参数
-python -m tools.stock_advisor.stock_advisor Alibaba --api eastmoney --top-k 80
+python -m tools.stock_advisor.stock_advisor Alibaba --top-k 80
 
 # 只看不落盘
 python -m tools.stock_advisor.stock_advisor Tencent --no-write
@@ -33,13 +33,16 @@ python -m tools.stock_advisor.stock_advisor Tencent --force-refresh
 cd D:\GitHub\Trader\tools\stock_advisor
 
 python stock_advisor.py Tencent
-python stock_advisor.py Alibaba --api eastmoney --top-k 80
+python stock_advisor.py Alibaba --top-k 80
 python stock_advisor.py Tencent --no-write
 python stock_advisor.py Tencent --force-refresh
 ```
 
 脚本顶部会自动把项目根加进 `sys.path`，所以 `database` / `quantitative`
 等顶层包都能正常 import。
+
+不传 `--api` 时使用 `QuoteAPIFactory.current_source()`；`--help` 中的数据源选项
+由 `QuoteAPIFactory.available_sources()` 动态生成。
 
 ### 常见错误
 

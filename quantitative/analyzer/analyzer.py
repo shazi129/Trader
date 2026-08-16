@@ -19,20 +19,20 @@ _log = get_logger(__name__)
 class QuantAnalyzer:
     """量化分析器。"""
 
-    def __init__(self, api: str = "tencent", use_cache: bool = True):
+    def __init__(self, api: Optional[str] = None, use_cache: bool = True):
         """
-        :param api: 数据源名称 (tencent/eastmoney/sina)
+        :param api: 数据源名称；不传时使用 QuoteAPIFactory 当前默认源
         :param use_cache: 是否使用数据库缓存
         """
-        self.api = api
+        self.api = api or QuoteAPIFactory.current_source()
         self.use_cache = use_cache
 
         # 走 Factory 单例缓存（同一进程同 source 复用 raw + cached 实例与 DB 连接）
         if use_cache:
-            self.impl = QuoteAPIFactory.create_with_cache(api)
+            self.impl = QuoteAPIFactory.create_with_cache(self.api)
             _log.info("使用带缓存的API: %s", self.impl.SOURCE)
         else:
-            self.impl = QuoteAPIFactory.create(api)
+            self.impl = QuoteAPIFactory.create(self.api)
             _log.info("使用原始API: %s", self.impl.SOURCE)
 
     def analyze(self, name_key: str, days: int = 500) -> Optional[AnalysisReport]:

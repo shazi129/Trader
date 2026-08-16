@@ -2,21 +2,19 @@
 """
 行情接口包
 
-提供统一抽象，支持从多个数据源获取股票 K 线 / 单日快照：
-- 新浪财经   (sina)
-- 腾讯财经   (tencent)
-- 东方财富   (eastmoney)
-- 富途 OpenAPI (futu，需要运行 OpenD)
+提供统一抽象，从 ``QuoteAPIFactory`` 当前注册的数据源获取股票 K 线 / 单日快照。
+可用源调用 ``QuoteAPIFactory.available_sources()``，当前默认源调用
+``QuoteAPIFactory.current_source()``，调用方不维护数据源名单。
 
 使用示例：
     from quote_api import QuoteAPIFactory
 
     # 不带缓存
-    api = QuoteAPIFactory.create("eastmoney")
+    api = QuoteAPIFactory.create()
     quotes = api.get_klines("Tencent", limit=500)
 
     # 带数据库缓存（推荐）
-    api = QuoteAPIFactory.create_with_cache("eastmoney")
+    api = QuoteAPIFactory.create_with_cache()
     quotes = api.get_klines("Tencent", limit=500)  # 自动缓存
 """
 

@@ -15,7 +15,7 @@
 
 使用方法：
     python -m quantitative.quant_analyzer Tencent
-    python -m quantitative.quant_analyzer Alibaba --api tencent --days 500
+    python -m quantitative.quant_analyzer Alibaba --days 500
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import sys
 
+from quote_api import QuoteAPIFactory
 from quantitative.analyzer import (
     AnalysisReport,
     FactorResult,
@@ -47,9 +48,15 @@ __all__ = [
 # ===========================================================================
 
 def main():
+    current_api = QuoteAPIFactory.current_source()
     parser = argparse.ArgumentParser(description="量化因子分析工具")
     parser.add_argument("stock", help="股票 name_key（如 Tencent, Alibaba）")
-    parser.add_argument("--api", default="tencent", help="数据源 (default: tencent)")
+    parser.add_argument(
+        "--api",
+        choices=QuoteAPIFactory.available_sources(),
+        default=current_api,
+        help="数据源 (default: %(default)s)",
+    )
     parser.add_argument("--days", type=int, default=500, help="历史数据天数 (default: 500)")
     parser.add_argument("--no-cache", action="store_true",
                         help="不使用数据库缓存 (default: 使用缓存)")

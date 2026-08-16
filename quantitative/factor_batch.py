@@ -325,7 +325,7 @@ class FactorSeriesEngine:
 MIN_BARS_FOR_FACTORS = 600
 
 
-def compute_and_save_factors(stock_name: str, api_name: str = "tencent",
+def compute_and_save_factors(stock_name: str, api_name: Optional[str] = None,
                              db_path: Optional[str] = None,
                              limit: Optional[int] = None,
                              force_refresh: bool = False) -> bool:
@@ -336,6 +336,7 @@ def compute_and_save_factors(stock_name: str, api_name: str = "tencent",
         拉取永远按区间补齐策略，由 ``CachedQuoteAPI`` 决定是否分批请求上游。
     """
 
+    api_name = api_name or QuoteAPIFactory.current_source()
     _log.info("开始处理股票: %s", stock_name)
 
     # 1. 获取K线数据（Factory 内部已做单例缓存，重复调用不会创建新实例）
@@ -387,7 +388,7 @@ def compute_and_save_factors(stock_name: str, api_name: str = "tencent",
     return True
 
 
-def batch_process_all_stocks(api_name: str = "tencent",
+def batch_process_all_stocks(api_name: Optional[str] = None,
                              db_path: Optional[str] = None):
     """批量处理 config.global_stock_list 中所有股票。"""
     import config
@@ -414,9 +415,15 @@ def batch_process_all_stocks(api_name: str = "tencent",
 # ===========================================================================
 
 def main():
+    current_api = QuoteAPIFactory.current_source()
     parser = argparse.ArgumentParser(description="批量计算并保存因子到数据库")
     parser.add_argument("--stock", help="指定股票名称 (如 Tencent)，不指定则处理所有")
-    parser.add_argument("--api", default="tencent", help="API数据源 (default: tencent)")
+    parser.add_argument(
+        "--api",
+        choices=QuoteAPIFactory.available_sources(),
+        default=current_api,
+        help="API数据源 (default: %(default)s)",
+    )
     parser.add_argument("--limit", type=int, default=None,
                         help="可选：只用最近 N 条 K 线参与计算（默认用全部）")
     parser.add_argument("--db", help="数据库路径 (默认: database/stock_data.db)")

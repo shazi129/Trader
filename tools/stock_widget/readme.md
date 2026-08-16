@@ -24,7 +24,6 @@ python stock_widget.py
 
 ```json
 {
-    "api": "sina",
     "stocks": ["Tencent", "Alibaba", "AG"],
     "active": "Alibaba",
     "refresh_interval": 60,
@@ -36,7 +35,7 @@ python stock_widget.py
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `api` | string | 数据源：`"sina"` / `"tencent"` / `"eastmoney"` |
+| `api` | string | 可选；省略时使用 `QuoteAPIFactory.current_source()`，有效值由 `available_sources()` 提供 |
 | `stocks` | string[] | 候选股票的 `name_key` 列表，对应 `quote_api/stock_meta.py` 中 `STOCK_META` 的键；展示名直接从 `STOCK_META` 读取 |
 | `active` | string | 当前显示的 `name_key`，必须出现在 `stocks` 中；右键"切换股票"会写回此字段 |
 | `refresh_interval` | int | 刷新秒数 |
@@ -51,21 +50,17 @@ python stock_widget.py
 
 ## 数据源支持度
 
-| 源 | A 股实时 | 港股实时 | 美股实时 | 备注 |
-|---|---|---|---|---|
-| `sina`       | ✅ | ✅ 快照 | — | **港股没有历史 K 线**，但浮窗只要实时价就够用 |
-| `tencent`    | ✅ | ✅ | ✅ | 推荐 |
-| `eastmoney`  | ✅ | ✅ | ✅ | 偶发反爬 |
-
-对浮窗来说，只要该源实现了 `get_daily_quote(name_key)` 就能用；具体各源对
-哪些 `name_key` 有映射，看 `quote_api/<source>/config.json`。
+浮窗的数据源菜单直接读取 `QuoteAPIFactory.available_sources()`，默认值读取
+`QuoteAPIFactory.current_source()`，不单独维护 provider 名单。只要已注册源实现
+`get_daily_quote(name_key)` 即可使用；具体股票映射见对应 provider 的 `config.json`。
 
 ## 添加一只要显示的股票
 
 1. 确认 `quote_api/stock_meta.py` 的 `STOCK_META` 里有它；没有就先加（见
    根 [README.md 的"新增一只股票"](../../README.md#新增一只股票)）。
 2. 确认选用的 `api` 对应的 `quote_api/<api>/config.json` 里有 `name_key → 代码` 映射。
-3. 往本 `config.json` 的 `stocks` 列表里加一条，`show: true`。
+3. 往本 `config.json` 的 `stocks` 列表里加入该 `name_key`，需要默认显示时同步
+   修改 `active`。
 
 ## 故障排查
 

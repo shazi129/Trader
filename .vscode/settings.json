@@ -1,3 +1,0 @@
-{
-    "pyqt-integration.pyuic.compile.filepath": "gen/${ui_name}_generated.py"
-}

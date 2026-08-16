@@ -26,12 +26,8 @@ _log = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # 分批拉取窗口（按交易日数计）
 #
-# 各上游单次拉取的物理上限：
-#   - 腾讯  count 上限 ≈ 640（最弱）
-#   - 新浪  datalen 上限 1000
-#   - 东方财富  lmt 上限 ~100000（基本不限）
-#
-# 取最弱源的安全值：600 交易日 ≈ 840 日历日（约 2.3 年），保证三家都稳。
+# 统一取保守安全值：600 交易日 ≈ 840 日历日（约 2.3 年）；支持分页的
+# provider 可在各自实现内部继续翻页。
 # ---------------------------------------------------------------------------
 BATCH_TRADING_DAYS = 600
 # 交易日 → 日历日的安全换算（每周 5 个交易日，向上取整再加缓冲）
@@ -64,7 +60,7 @@ class CachedQuoteAPI(QuoteAPI):
 
     用法（推荐用 ``with``，确保 DB 连接被关闭）::
 
-        raw_api = QuoteAPIFactory.create("eastmoney")
+        raw_api = QuoteAPIFactory.create()
         with CachedQuoteAPI(raw_api) as api:
             klines = api.get_klines("Tencent", limit=500)
 

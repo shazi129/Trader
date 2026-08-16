@@ -1,6 +1,6 @@
 # Trader
 
-> 多数据源行情抽象 + SQLite 长表缓存 + 量化因子库 + PySide6 桌面端 + 一组命令行工具的个人交易研究项目。
+> 多数据源行情抽象 + SQLite 长表缓存 + 量化因子库 + 命令行工具与报价浮窗的个人交易研究项目。
 
 ## 目录
 
@@ -21,37 +21,42 @@
 
 ## 项目定位
 
-把"取数据 → 落库 → 算因子 → 出报告 / 看盘面"这条链路，做成**模块化、可
-脚本化、可桌面化**的一套自用工具。
+把“取数据 → 落库 → 算因子 → 出报告”这条链路，做成模块化、可脚本化的
+一套自用工具。
 
-- **数据源解耦**：东方财富 / 腾讯财经 / 新浪财经 同一抽象接口，可随时切换。
+- **数据源解耦**：所有已注册数据源使用同一抽象接口，可随时切换；名单由
+  `QuoteAPIFactory.available_sources()` 提供。
 - **本地优先**：所有 K 线和因子都落进单文件 SQLite，离线也能跑分析。
 - **量化分层**：指标原语（pure function）→ 因子字段（dataclass）→ 信号编排
   （analyzer）→ 多周期回测（horizon backtester）四层解耦，不互相污染。
-- **多入口**：GUI 看盘、CLI 拉数 / 跑分析、桌面浮窗看价，按需取用。
+- **独立入口**：拉数、因子计算、分析和报告生成均可独立运行；报价浮窗按需启动。
 
 ## 特性
 
-- `QuoteAPI` 统一接口 + `QuoteAPIFactory` 进程级单例，三家数据源任意切换。
+- `QuoteAPI` 统一接口 + `QuoteAPIFactory` 进程级单例，已注册数据源任意切换。
 - `CachedQuoteAPI` 旁路缓存：先查 DB、缺什么拉什么，对调用方透明。
 - `StockDB` 长表方案：1 张 K 线表 + 6 张因子长表（复合主键 `(Symbol, Date)`），
   天然支持横截面查询，迁移历史 DB 时自动 `ALTER TABLE` 补列。
 - 60+ 个内建因子（趋势 / 动量 / 成交量 / 风险 / 均线比率），可一行命令批量入库。
 - 「当前状态评分 + 历史相似态多周期回测」双视角分析报告（markdown 落盘）。
-- PySide6 桌面端 + pyqtgraph 绘图；附带极简的浮窗实时报价小控件。
+- 财报 PDF 解析与字段归一，可扩展不同市场的财报解析器。
+- 独立 PySide6 报价浮窗，不依赖已移除的主窗口 UI。
 
 ## 目录结构
 
 ```
 Trader/
-├── main.py                       # PySide6 GUI 启动入口
-├── config.py                     # 全局配置：数据源、事件枚举
+├── config.py                     # 全局配置：默认行情数据源
 ├── quote_api/                    # 行情数据源统一抽象层（多源实现 + 缓存包装）
 │   ├── quote_base.py             # QuoteAPI 基类、DailyQuote/StockFundamental
 │   ├── quote_factory.py          # QuoteAPIFactory（含进程级单例）
 │   ├── cached_api.py             # CachedQuoteAPI 旁路缓存
 │   ├── stock_meta.py             # STOCK_META 全项目股票清单
-│   ├── eastmoney/ futu/ tencent/ sina/ # 具体实现 + 各自 config.json
+│   └── <provider>/               # 已注册实现 + 各自 config.json
+├── financial_reports/            # 财报领域模型、字段归一与 PDF 解析器
+│   ├── models.py                 # FinancialReport 统一数据模型
+│   ├── parser_base.py            # 财报解析器接口
+│   └── parsers/                  # 各市场财报解析实现
 ├── quantitative/                 # 量化分析三层
 │   ├── indicators/               # 纯函数指标原语（SMA/EMA/RSI/KDJ/ADX/...）
 │   ├── factors/                  # KlineIndicator 字段 dataclass（6 mixin）
@@ -64,11 +69,11 @@ Trader/
 ├── tools/                        # 各自独立的命令行小工具
 │   ├── kline_fetcher/            # 定时 / 守护拉 K 线（写库后自动算因子）
 │   ├── stock_advisor/            # 多因子 + 相似态回测，落盘 markdown 报告
-│   ├── stock_widget/             # PySide6 浮窗实时报价
-│   └── fund_holdings/            # SEC 13F 持仓抓取与可视化
-├── ui/                           # 主窗口、子 widget、Qt Designer 生成
-├── utils/                        # logger、event_system、ratio、stock_updater
-├── test/                         # pytest（database/）+ 一些手工脚本
+│   ├── stock_widget/             # 独立 PySide6 浮窗实时报价
+│   ├── fund_holdings/            # SEC 13F 持仓抓取与可视化
+│   └── db_inspector/             # 默认数据库结构检查脚本
+├── utils/                        # logger、ratio、stock_updater
+├── tests/                        # pytest 自动测试（单元测试 + 默认排除的集成测试）
 ├── docs/                         # 工程文档（见底部"更多文档"）
 └── requirements.txt              # 依赖清单
 ```
@@ -84,8 +89,6 @@ python -m venv .venv
 .venv\Scripts\activate           # Windows
 pip install -r requirements.txt
 ```
-
-> Windows 上 `PySide6` 的 `pip` 安装通常不需要额外编译，直接装即可。
 
 ## 快速开始
 
@@ -111,13 +114,7 @@ python -m tools.stock_advisor.stock_advisor Tencent
 3. 因子明细
 4. 风险提示
 
-### 3. 启动桌面 GUI
-
-```bash
-python main.py
-```
-
-### 4. 启动浮窗报价
+### 3. 启动报价浮窗
 
 ```bash
 python tools/stock_widget/stock_widget.py
@@ -127,12 +124,11 @@ python tools/stock_widget/stock_widget.py
 
 | 入口 | 命令 | 作用 |
 |---|---|---|
-| GUI 主程序 | `python main.py` | PySide6 主窗口，支持比值图等 |
 | 单股快速分析 | `python -m quantitative.quant_analyzer <name> [--api ...] [--days 500] [--no-cache]` | 控制台文本报告 |
 | 批量因子入库 | `python -m quantitative.factor_batch [--stock X] [--api ...] [--limit 5000] [--db PATH] [--force-refresh]` | 给 `STOCK_META` 全部或指定股票算因子并 UPSERT 入库 |
 | K 线增量抓取 | `python tools/kline_fetcher/kline_fetcher.py {run\|daemon} [--config PATH] [--run-on-start]` | 写库后**自动**同步刷新因子表 |
 | 股票顾问 | `python -m tools.stock_advisor.stock_advisor <name> [--api ...] [--top-k 80] [--no-write] [--force-refresh]` | 因子 + 相似态回测，markdown 报告 |
-| 浮窗报价 | `python tools/stock_widget/stock_widget.py` | 极简浮空小控件 |
+| 浮窗报价 | `python tools/stock_widget/stock_widget.py` | 独立的桌面实时报价浮窗 |
 | 全市场更新 | `python utils/stock_updater.py` | 从 DB 最新日期增量补 K 线 |
 
 各子工具内还有自己的 README（[`kline_fetcher`](tools/kline_fetcher/README.md) /
@@ -144,11 +140,11 @@ python tools/stock_widget/stock_widget.py
 
 | 位置 | 字段 | 说明 |
 |---|---|---|
-| `config.py` | `QUOTE_SOURCE` | 默认行情源：`"eastmoney"` / `"futu"` / `"tencent"` / `"sina"` |
+| `config.py` | `QUOTE_SOURCE` | 默认行情源；有效值见 `QuoteAPIFactory.available_sources()` |
 | `quote_api/stock_meta.py` | `STOCK_META` | 全项目股票清单（`name_key → StockInfo`） |
 | `quote_api/<src>/config.json` | `stocks` 映射 | 该数据源支持的 `name_key → 真实代码` |
 | `tools/kline_fetcher/config.json` | `api / db_path / earliest_date / schedule_time / stocks` | 抓取行为 |
-| `tools/stock_widget/config.json` | `api / stocks / refresh_interval / opacity / font_size / position` | 浮窗显示 |
+| `tools/stock_widget/config.json` | `stocks / active / refresh_interval / opacity / font_size / position` | 浮窗显示 |
 
 数据库默认路径是 `database/stock_data.db`，由 `StockDB(db_path=None)` 内部解析；
 所有工具都接受 `--db` 或在配置里覆盖。
@@ -171,9 +167,11 @@ python tools/stock_widget/stock_widget.py
   不要直接 `print`。
 - **测试**：
   ```bash
-  pytest test/database          # 数据库层单测
+  pytest                         # 默认运行全部离线自动测试
+  pytest tests/database          # 仅运行数据库层单测
+  pytest -m integration          # 显式运行需要真实外部服务的集成测试
   ```
-  `test/` 下另外散落一些手工探活脚本（带 `test_` / `check_` 前缀），按需直接 `python` 跑。
+  数据库检查脚本位于 `tools/db_inspector/`，不参与 pytest 收集。
 - **新增因子的最短路径**：
   1. 在 `quantitative/indicators/` 加一个纯函数算法；
   2. 在 `quantitative/factors/<group>.py` 的对应 mixin 上加字段；
@@ -196,9 +194,10 @@ A：你在 `tools/xxx` 子目录里跑了 `python -m tools.xxx.yyy`。`-m` 必�
 A：在子目录里跑了 `python -m yyy`（无父包）。回项目根用 `-m` 或者直接 `python yyy.py`。
 详见 [tools/stock_advisor/README.md](tools/stock_advisor/README.md#常见错误)。
 
-**Q：东方财富 / 腾讯接口抽风、超时？**
-A：临时切到另一个数据源即可，`config.QUOTE_SOURCE` 改一下，或者命令行加
-`--api tencent`。三家实现都已经做了基本的 UA / 错误兜底。
+**Q：行情接口抽风、超时？**
+A：先用 `QuoteAPIFactory.available_sources()` 查看可用源，再通过
+`config.QUOTE_SOURCE` 或命令行 `--api` 切换；不传 `--api` 时使用
+`QuoteAPIFactory.current_source()`。
 
 **Q：因子表跟 K 线表日期对不上？**
 A：`kline_fetcher` 写库成功后会自动调 `compute_and_save_factors` 把因子刷到

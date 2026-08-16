@@ -18,7 +18,6 @@ from enum import Enum
 from typing import Optional
 
 from quote_api.quote_base import QuoteAPI
-from quote_api.eastmoney import EastMoneyQuoteAPI
 from quote_api.futu import FutuQuoteAPI
 from quote_api.tencent import TencentQuoteAPI
 from quote_api.sina import SinaQuoteAPI
@@ -27,7 +26,6 @@ from quote_api.cached_api import CachedQuoteAPI
 
 class QuoteSource(str, Enum):
     """支持的数据源枚举"""
-    EASTMONEY = "eastmoney"
     FUTU = "futu"
     TENCENT = "tencent"
     SINA = "sina"
@@ -38,14 +36,13 @@ class QuoteAPIFactory:
     行情 API 工厂。
 
     用法：
-        api = QuoteAPIFactory.create("eastmoney")
-        api = QuoteAPIFactory.create(QuoteSource.SINA)
-        api = QuoteAPIFactory.create()                # 用 config.QUOTE_SOURCE
+        api = QuoteAPIFactory.create()                # 当前默认源
+        names = QuoteAPIFactory.available_sources()   # 全部已注册源
+        current = QuoteAPIFactory.current_source()    # 当前默认源名称
         api = QuoteAPIFactory.create_with_cache(...)  # 带 DB 缓存
     """
 
     _REGISTRY: dict[str, type[QuoteAPI]] = {
-        QuoteSource.EASTMONEY.value: EastMoneyQuoteAPI,
         QuoteSource.FUTU.value: FutuQuoteAPI,
         QuoteSource.TENCENT.value: TencentQuoteAPI,
         QuoteSource.SINA.value: SinaQuoteAPI,
@@ -81,7 +78,28 @@ class QuoteAPIFactory:
     # ------------------------------------------------------------------
     @classmethod
     def available_sources(cls) -> list[str]:
+        """返回当前已注册的全部行情源；供菜单、CLI choices 等直接使用。"""
         return list(cls._REGISTRY.keys())
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def current_source(cls) -> str:
+        """返回当前默认行情源。
+
+        默认值只从 ``config.QUOTE_SOURCE`` 和注册表解析。配置缺失或指向已卸载
+        的 provider 时，回退到注册表中的第一个实现，调用方无需维护第二份名单。
+        """
+        try:
+            import config
+            configured = str(getattr(config, "QUOTE_SOURCE", "")).lower()
+        except Exception:
+            configured = ""
+        if configured in cls._REGISTRY:
+            return configured
+        try:
+            return next(iter(cls._REGISTRY))
+        except StopIteration as exc:  # pragma: no cover - 注册表通常不会为空
+            raise RuntimeError("no quote source is registered") from exc
 
     # ------------------------------------------------------------------
     @classmethod
@@ -103,12 +121,7 @@ class QuoteAPIFactory:
             return source.value
         if isinstance(source, str) and source:
             return source.lower()
-        # 未指定：读 config.QUOTE_SOURCE，兜底东方财富
-        try:
-            import config
-            return str(getattr(config, "QUOTE_SOURCE", QuoteSource.EASTMONEY.value)).lower()
-        except Exception:
-            return QuoteSource.EASTMONEY.value
+        return cls.current_source()
 
     # ------------------------------------------------------------------
     @classmethod

@@ -5,7 +5,7 @@
 用法::
 
     python -m tools.stock_advisor.stock_advisor Tencent
-    python -m tools.stock_advisor.stock_advisor Alibaba --api eastmoney --top-k 80
+    python -m tools.stock_advisor.stock_advisor Alibaba --top-k 80
     python -m tools.stock_advisor.stock_advisor Tencent --no-write   # 只看不落盘
 
 流程：
@@ -573,7 +573,7 @@ def _build_price_map(quotes: list[DailyQuote],
 # 主流程
 # ===========================================================================
 
-def analyze_stock(name_key: str, *, api: str = "eastmoney",
+def analyze_stock(name_key: str, *, api: Optional[str] = None,
                   db_path: Optional[str] = None,
                   top_k: int = 50,
                   write_report: bool = True,
@@ -583,6 +583,7 @@ def analyze_stock(name_key: str, *, api: str = "eastmoney",
 
     :return: 报告文件路径（write_report=True 时），否则 None
     """
+    api = api or QuoteAPIFactory.current_source()
     stock_info = config.global_stock_list.get(name_key)
     if stock_info is None:
         _log.error("[%s] 未在 config.global_stock_list 中登记", name_key)
@@ -674,12 +675,18 @@ def analyze_stock(name_key: str, *, api: str = "eastmoney",
 # ===========================================================================
 
 def main() -> int:
+    current_api = QuoteAPIFactory.current_source()
+    available_apis = QuoteAPIFactory.available_sources()
     parser = argparse.ArgumentParser(
         description="股票综合分析工具：行情/因子/历史相似态预测",
     )
     parser.add_argument("stock", help="股票 name_key (如 Tencent)")
-    parser.add_argument("--api", default="eastmoney",
-                        help="数据源（缺数据时回源用），default: eastmoney")
+    parser.add_argument(
+        "--api",
+        choices=available_apis,
+        default=current_api,
+        help="数据源（缺数据时回源用，default: %(default)s）",
+    )
     parser.add_argument("--db", help="数据库路径（不指定走默认）")
     parser.add_argument("--top-k", type=int, default=50,
                         help="历史相似日数量，default: 50")

@@ -17,8 +17,8 @@
 from quote_api import QuoteAPIFactory
 from quote_api.cached_api import CachedQuoteAPI
 
-# 创建原始API
-raw_api = QuoteAPIFactory.create("eastmoney")
+# 创建当前默认的原始 API
+raw_api = QuoteAPIFactory.create()
 
 # 包装为带缓存的API
 api = CachedQuoteAPI(raw_api)
@@ -32,8 +32,8 @@ klines = api.get_klines("Tencent", limit=500)  # 自动缓存
 ```python
 from quote_api import QuoteAPIFactory
 
-# 一行代码创建带缓存的API
-api = QuoteAPIFactory.create_with_cache("eastmoney")
+# 一行代码创建当前默认的带缓存 API
+api = QuoteAPIFactory.create_with_cache()
 
 # 使用方式与普通API完全一致
 klines = api.get_klines("Tencent", limit=500)  # 自动缓存
@@ -54,12 +54,12 @@ python -m quantitative.quant_analyzer Tencent --no-cache
 ```python
 from quantitative.quant_analyzer import QuantAnalyzer
 
-# 使用缓存（默认）
-analyzer = QuantAnalyzer(api="tencent", use_cache=True)
+# 使用缓存（默认数据源由 Factory 解析）
+analyzer = QuantAnalyzer(use_cache=True)
 report = analyzer.analyze("Tencent", days=500)
 
 # 不使用缓存
-analyzer = QuantAnalyzer(api="tencent", use_cache=False)
+analyzer = QuantAnalyzer(use_cache=False)
 report = analyzer.analyze("Tencent", days=500)
 ```
 
@@ -68,10 +68,10 @@ report = analyzer.analyze("Tencent", days=500)
 运行测试脚本验证功能：
 
 ```bash
-python test/test_cached_api.py
+python -m pytest -m integration tests/integration/test_cached_api.py
 ```
 
-测试脚本会验证：
+集成测试使用临时数据库，不会修改默认行情数据库。测试会验证：
 1. 首次调用是否从API拉取数据
 2. 再次调用是否从数据库读取
 3. 数据一致性是否正确

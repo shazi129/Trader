@@ -99,8 +99,16 @@ def load_config(path: Path) -> FetcherConfig:
     if not isinstance(exclude, list):
         exclude = []
 
+    configured_api = str(raw.get("api") or "").lower()
+    available_apis = QuoteAPIFactory.available_sources()
+    api_name = (
+        configured_api
+        if configured_api in available_apis
+        else QuoteAPIFactory.current_source()
+    )
+
     return FetcherConfig(
-        api_name=str(raw.get("api", "eastmoney")),
+        api_name=api_name,
         schedule_time=str(raw.get("schedule_time", "17:30")),
         exclude=[str(k) for k in exclude],
     )

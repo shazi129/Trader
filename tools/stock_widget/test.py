@@ -94,12 +94,13 @@ def format_quote(quote: DailyQuote) -> str:
 
 def main():
     config = load_config()
-    api_name = config.get("api", "tencent")
+    api_name = config.get("api", QuoteAPIFactory.current_source())
     stocks = config.get("stocks", [])
     active = config.get("active", "")
 
     print("=" * 60)
     print(f"  数据源: {api_name}")
+    print(f"  可用数据源: {QuoteAPIFactory.available_sources()}")
     print(f"  股票列表: {stocks}")
     print(f"  当前选中: {active}")
     print("=" * 60)

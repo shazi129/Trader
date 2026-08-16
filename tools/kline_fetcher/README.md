@@ -19,7 +19,7 @@
 
 ```json
 {
-    "api": "futu",                 // 数据源: futu / eastmoney / tencent / sina
+    "api": "<source>",             // 有效值见 QuoteAPIFactory.available_sources()
     "db_path": null,               // null = 用 database/stock_data.db 默认路径
     "earliest_date": "2010-01-01", // 全局兜底：DB 无记录、个股也没单独配 earliest_date 时使用
     "schedule_time": "17:30",      // 守护模式每日触发时间（本机时区，HH:MM）
@@ -34,8 +34,8 @@
 
 `name_key` 必须是 `quote_api/stock_meta.py` 中 `STOCK_META` 已注册的键。
 
-使用 `futu` 前需先安装并登录 OpenD，默认连接 `127.0.0.1:11111`。远程或
-非默认端口可通过 `FUTU_OPEND_HOST`、`FUTU_OPEND_PORT` 环境变量配置。
+省略 `api` 时使用 `QuoteAPIFactory.current_source()`；provider 如有额外运行环境
+要求，以其自身目录中的说明为准。
 
 ### 起始日期优先级
 
