@@ -497,18 +497,24 @@ def main() -> int:
         _log.error("配置文件不存在: %s", config_path)
         return 2
 
-    if args.mode == "run":
-        return run_once(config_path)
-    elif args.mode == "daemon":
-        return run_daemon(config_path, run_on_start=args.run_on_start)
-    elif args.mode == "fill":
-        return run_fill(args.symbol, config_path)
-    elif args.mode == "recent":
-        return run_recent(args.symbol, args.days, config_path)
-    elif args.mode == "delete":
-        return run_delete(args.symbol, config_path)
-    else:
-        return 1
+    try:
+        if args.mode == "run":
+            return run_once(config_path)
+        elif args.mode == "daemon":
+            return run_daemon(config_path, run_on_start=args.run_on_start)
+        elif args.mode == "fill":
+            return run_fill(args.symbol, config_path)
+        elif args.mode == "recent":
+            return run_recent(args.symbol, args.days, config_path)
+        elif args.mode == "delete":
+            return run_delete(args.symbol, config_path)
+        else:
+            return 1
+    finally:
+        # 释放 Factory 缓存的实例（含 Futu 的 OpenQuoteContext 网络连接、
+        # 以及 CachedQuoteAPI 的 DB 连接），否则 futu 的后台线程会让进程
+        # 在任务结束后仍然不退出。
+        QuoteAPIFactory.clear_cache()
 
 
 if __name__ == "__main__":
