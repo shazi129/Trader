@@ -5,7 +5,7 @@
 
 设计要点：
 - ``create()`` / ``create_with_cache()`` 默认走**单例缓存**：同一进程
-  内同一 source 复用同一个上游 API 实例，避免重复实例化和多份 DB
+  内同一 source + adjustment 复用同一个上游 API 实例，避免重复实例化和多份 DB
   连接（``CachedQuoteAPI`` 内部会懒加载 ``StockDB``，每个新实例都
   会开一个新连接）。
 - 如需绕过缓存（例如测试场景），传 ``cached=False`` 即可。
@@ -17,7 +17,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from quote_api.quote_base import QuoteAPI
+from quote_api.quote_base import KlineAdjustment, QuoteAPI
 from quote_api.futu import FutuQuoteAPI
 from quote_api.tencent import TencentQuoteAPI
 from quote_api.sina import SinaQuoteAPI
@@ -48,19 +48,25 @@ class QuoteAPIFactory:
         QuoteSource.SINA.value: SinaQuoteAPI,
     }
 
-    # 进程级实例缓存（懒加载、按 source 单例）
-    _RAW_INSTANCES: dict[str, QuoteAPI] = {}
-    _CACHED_INSTANCES: dict[str, CachedQuoteAPI] = {}
+    # 进程级实例缓存（懒加载、按 source + adjustment 单例）
+    _RAW_INSTANCES: dict[tuple[str, str], QuoteAPI] = {}
+    _CACHED_INSTANCES: dict[tuple[str, str], CachedQuoteAPI] = {}
 
     # ------------------------------------------------------------------
     @classmethod
     def create(cls, source: Optional[str | QuoteSource] = None,
-               cached: bool = True) -> QuoteAPI:
+               cached: bool = True,
+               adjustment: Optional[str | KlineAdjustment] = None) -> QuoteAPI:
         """创建（或返回已缓存的）原始 API 实例。
 
         :param cached: True 时返回单例（默认）；False 时每次新建。
+        :param adjustment: 复权方式；None 时读取全局配置。
         """
         key = cls._resolve_key(source)
+        mode = KlineAdjustment.parse(
+            adjustment if adjustment is not None else cls.current_adjustment()
+        )
+        cache_key = (key, mode.value)
         impl = cls._REGISTRY.get(key)
         if impl is None:
             raise ValueError(
@@ -68,11 +74,11 @@ class QuoteAPIFactory:
                 % (key, list(cls._REGISTRY.keys()))
             )
         if not cached:
-            return impl()
-        inst = cls._RAW_INSTANCES.get(key)
+            return impl(adjustment=mode)
+        inst = cls._RAW_INSTANCES.get(cache_key)
         if inst is None:
-            inst = impl()
-            cls._RAW_INSTANCES[key] = inst
+            inst = impl(adjustment=mode)
+            cls._RAW_INSTANCES[cache_key] = inst
         return inst
 
     # ------------------------------------------------------------------
@@ -103,16 +109,25 @@ class QuoteAPIFactory:
 
     # ------------------------------------------------------------------
     @classmethod
+    def current_adjustment(cls) -> KlineAdjustment:
+        """返回 ``config.KLINE_ADJUSTMENT`` 指定的历史 K 线复权方式。"""
+        try:
+            import config
+            configured = getattr(config, "KLINE_ADJUSTMENT", None)
+        except Exception:
+            configured = None
+        return KlineAdjustment.parse(configured)
+
+    # ------------------------------------------------------------------
+    @classmethod
     def register(cls, source: str, impl: type[QuoteAPI]) -> None:
         """允许外部扩展新的数据源"""
         cls._REGISTRY[source] = impl
         # 注册时清掉同名旧缓存，避免读到过期实现
-        cached = cls._CACHED_INSTANCES.pop(source, None)
-        if cached is not None:
-            cached.close()
-        raw = cls._RAW_INSTANCES.pop(source, None)
-        if raw is not None:
-            raw.close()
+        for cache_key in [key for key in cls._CACHED_INSTANCES if key[0] == source]:
+            cls._CACHED_INSTANCES.pop(cache_key).close()
+        for cache_key in [key for key in cls._RAW_INSTANCES if key[0] == source]:
+            cls._RAW_INSTANCES.pop(cache_key).close()
 
     # ------------------------------------------------------------------
     @classmethod
@@ -126,18 +141,28 @@ class QuoteAPIFactory:
     # ------------------------------------------------------------------
     @classmethod
     def create_with_cache(cls, source: Optional[str | QuoteSource] = None,
-                          cached: bool = True) -> CachedQuoteAPI:
+                          cached: bool = True,
+                          adjustment: Optional[str | KlineAdjustment] = None,
+                          ) -> CachedQuoteAPI:
         """创建（或返回已缓存的）带 DB 缓存的 API 实例。
 
         :param cached: True 时返回单例（默认）；False 时每次新建（含新 DB 连接）。
         """
         key = cls._resolve_key(source)
+        mode = KlineAdjustment.parse(
+            adjustment if adjustment is not None else cls.current_adjustment()
+        )
+        cache_key = (key, mode.value)
         if not cached:
-            return CachedQuoteAPI(cls.create(key, cached=False))
-        inst = cls._CACHED_INSTANCES.get(key)
+            return CachedQuoteAPI(
+                cls.create(key, cached=False, adjustment=mode)
+            )
+        inst = cls._CACHED_INSTANCES.get(cache_key)
         if inst is None:
-            inst = CachedQuoteAPI(cls.create(key, cached=True))
-            cls._CACHED_INSTANCES[key] = inst
+            inst = CachedQuoteAPI(
+                cls.create(key, cached=True, adjustment=mode)
+            )
+            cls._CACHED_INSTANCES[cache_key] = inst
         return inst
 
     # ------------------------------------------------------------------

@@ -71,7 +71,7 @@ class CachedQuoteAPI(QuoteAPI):
         """
         :param wrapped_api: 被包装的真实 API 实例
         """
-        super().__init__()
+        super().__init__(adjustment=wrapped_api.adjustment)
         self.SOURCE = wrapped_api.SOURCE + "_cached"
         self._wrapped = wrapped_api
         self._db = None  # 懒加载

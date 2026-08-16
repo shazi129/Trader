@@ -8,8 +8,9 @@
     涨跌额 fields[31]，涨跌幅 fields[32]，最高 fields[33]，最低 fields[34]
 
 - 历史 K 线：https://web.ifzq.gtimg.cn/appstock/app/fqkline/get
-    param: ?param=<symbol>,day,<start>,<end>,<count>,qfq
-    返回 data[<symbol>].qfqday / day 数组；行：[date, open, close, high, low, volume, info]
+    param: ?param=<symbol>,day,<start>,<end>,<count>,<none|qfq|hfq>
+    返回 data[<symbol>].day / qfqday / hfqday 数组；
+    行：[date, open, close, high, low, volume, info]
 
 symbol 规则（小写前缀 + 代码）：
     A 股：sh600519 / sz000001
@@ -28,7 +29,7 @@ from typing import Optional
 import requests
 
 from quote_api.stock_meta import StockMarket
-from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike
+from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, KlineAdjustment
 from quote_api.stock_meta import get_meta
 
 
@@ -47,8 +48,11 @@ class TencentQuoteAPI(QuoteAPI):
         "Referer": "https://finance.qq.com",
     }
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        adjustment: KlineAdjustment | str = KlineAdjustment.NONE,
+    ) -> None:
+        super().__init__(adjustment=adjustment)
         self._session = requests.Session()
         self._session.headers.update(self._HEADERS)
 
@@ -88,9 +92,10 @@ class TencentQuoteAPI(QuoteAPI):
         # 腾讯 K 线接口 count 上限约 640；区间型查询优先用 start/end
         count = limit if (limit is not None and limit > 0) else 640
 
+        mode = self.adjustment.value
         params = {
-            "param": "%s,day,%s,%s,%d,qfq"
-            % (symbol, sd or "", ed or "", count),
+            "param": "%s,day,%s,%s,%d,%s"
+            % (symbol, sd or "", ed or "", count, mode),
             "_var": "",
         }
 
@@ -107,8 +112,18 @@ class TencentQuoteAPI(QuoteAPI):
         if not isinstance(data, dict):
             return []
         bucket = data.get(symbol) or {}
-        rows = bucket.get("qfqday") or bucket.get("day") or []
+        bucket_key = {
+            KlineAdjustment.NONE: "day",
+            KlineAdjustment.QFQ: "qfqday",
+            KlineAdjustment.HFQ: "hfqday",
+        }[self.adjustment]
+        rows = bucket.get(bucket_key) or []
         if not rows:
+            if bucket:
+                print(
+                    "[TencentQuoteAPI] %s adjustment is not available for %s"
+                    % (mode, symbol)
+                )
             return []
 
         results: list[DailyQuote] = []
@@ -201,7 +216,11 @@ class TencentQuoteAPI(QuoteAPI):
 
     # ------------------------------------------------------------------
     @staticmethod
-    def _row_to_quote(row: list, name: str, symbol: str) -> Optional[DailyQuote]:
+    def _row_to_quote(
+        row: list,
+        name: str,
+        symbol: str,
+    ) -> Optional[DailyQuote]:
         # 行结构：[date, open, close, high, low, volume, extra...]
         if not row or len(row) < 6:
             return None

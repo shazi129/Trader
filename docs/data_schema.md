@@ -37,7 +37,7 @@
 | `Turnover` | REAL | 成交额（4 位小数） |
 | `TurnoverRate` | REAL | 换手率（数据源未提供时为 0） |
 
-> `pre_close` 不入库——前复权序列下 `pre_close = 上一行 close`，
+> `pre_close` 不入库——同一复权序列下 `pre_close = 上一行 close`，
 > 属可派生字段，分析层按需现算。
 
 ## 2. `factor_indicator` —— 基础技术指标

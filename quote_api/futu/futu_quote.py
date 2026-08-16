@@ -13,9 +13,8 @@
     A 股：SH.600519 / SZ.000001
     港股：HK.00700
     美股：US.NVDA
-
-当前 ``StockMarket.FUTURES`` 无法仅凭市场枚举确定富途交易所和合约代码，因此
-默认在本数据源的 config.json 中排除 AG；需要期货时应按具体合约单独配置。
+白银 ``AG`` 当前表示 iShares Silver Trust，在本数据源中映射为
+``US.SLV``。
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ import math
 import os
 from typing import Any, Optional
 
-from quote_api.quote_base import DailyQuote, DateLike, QuoteAPI
+from quote_api.quote_base import DailyQuote, DateLike, KlineAdjustment, QuoteAPI
 from quote_api.stock_meta import StockMarket, get_meta
 from utils.logger import get_logger
 
@@ -56,7 +55,7 @@ def _to_float(value: Any, default: float = 0.0) -> float:
 
 
 class FutuQuoteAPI(QuoteAPI):
-    """通过本机或远程 OpenD 获取前复权日 K 线。"""
+    """通过本机或远程 OpenD 获取日 K 线。"""
 
     SOURCE = "futu"
 
@@ -87,13 +86,14 @@ class FutuQuoteAPI(QuoteAPI):
         host: Optional[str] = None,
         port: Optional[int] = None,
         quote_context: Any = None,
+        adjustment: KlineAdjustment | str = KlineAdjustment.NONE,
     ) -> None:
         """创建富途行情源。
 
         ``quote_context`` 主要用于测试或由调用方复用已有上下文；传入时其生命周期
         仍由调用方管理。正常使用无需传入，连接会在第一次请求时延迟创建。
         """
-        super().__init__()
+        super().__init__(adjustment=adjustment)
         self._host = host or os.getenv("FUTU_OPEND_HOST", self.DEFAULT_HOST)
         raw_port = port if port is not None else os.getenv(
             "FUTU_OPEND_PORT", str(self.DEFAULT_PORT)
@@ -177,6 +177,52 @@ class FutuQuoteAPI(QuoteAPI):
         return "%s.%s" % (prefix, code)
 
     # ------------------------------------------------------------------
+    def get_daily_quote(
+        self,
+        name: str,
+        date: DateLike = None,
+    ) -> Optional[DailyQuote]:
+        """获取指定日期或最新实时快照。
+
+        指定 ``date`` 时仍通过历史 K 线精确查询；不指定时使用
+        OpenD 市场快照，避免把最近一根日 K 误当成实时价。
+        """
+        target = self.normalize_date(date)
+        if target is not None:
+            return super().get_daily_quote(name, target)
+
+        stock = get_meta(name)
+        symbol = self._futu_symbol(name)
+        if stock is None or symbol is None:
+            _log.warning("unknown or unsupported Futu stock: %s", name)
+            return None
+
+        sdk = _load_futu_sdk()
+        context = self._get_context()
+        try:
+            ret, data = context.get_market_snapshot([symbol])
+        except Exception as exc:
+            raise FutuQuoteError(
+                "Futu market snapshot request failed for %s: %s"
+                % (symbol, exc)
+            ) from exc
+
+        if ret != sdk.RET_OK:
+            raise FutuQuoteError(
+                "Futu market snapshot request failed for %s: %s"
+                % (symbol, data)
+            )
+        if not hasattr(data, "iterrows"):
+            raise FutuQuoteError(
+                "Futu returned unexpected snapshot payload for %s: %r"
+                % (symbol, type(data).__name__)
+            )
+
+        for _, row in data.iterrows():
+            return self._snapshot_to_quote(row, name, symbol, stock.market)
+        return None
+
+    # ------------------------------------------------------------------
     def get_klines(
         self,
         name: str,
@@ -197,6 +243,11 @@ class FutuQuoteAPI(QuoteAPI):
 
         sdk = _load_futu_sdk()
         context = self._get_context()
+        autype = {
+            KlineAdjustment.NONE: sdk.AuType.NONE,
+            KlineAdjustment.QFQ: sdk.AuType.QFQ,
+            KlineAdjustment.HFQ: sdk.AuType.HFQ,
+        }[self.adjustment]
         page_req_key = None
         seen_page_keys: set[bytes] = set()
         results: list[DailyQuote] = []
@@ -208,7 +259,7 @@ class FutuQuoteAPI(QuoteAPI):
                     start=sd,
                     end=ed,
                     ktype=sdk.KLType.K_DAY,
-                    autype=sdk.AuType.QFQ,
+                    autype=autype,
                     fields=[sdk.KL_FIELD.ALL],
                     max_count=self.PAGE_SIZE,
                     page_req_key=page_req_key,
@@ -253,6 +304,40 @@ class FutuQuoteAPI(QuoteAPI):
             end_date=ed,
             limit=limit,
         )
+
+    # ------------------------------------------------------------------
+    @classmethod
+    def _snapshot_to_quote(
+        cls,
+        row: Any,
+        name: str,
+        symbol: str,
+        market: StockMarket,
+    ) -> Optional[DailyQuote]:
+        date = str(row.get("update_time", ""))[:10]
+        close = _to_float(row.get("last_price"))
+        if len(date) != 10 or close <= 0:
+            return None
+
+        q = DailyQuote()
+        q.source = cls.SOURCE
+        q.name = name
+        q.code = symbol
+        q.date = date
+        q.open = _to_float(row.get("open_price"))
+        q.close = close
+        q.high = _to_float(row.get("high_price"))
+        q.low = _to_float(row.get("low_price"))
+        q.pre_close = _to_float(row.get("prev_close_price"))
+        q.volume = _to_float(row.get("volume"))
+        q.turnover = _to_float(row.get("turnover"))
+        # 市场快照的 turnover_rate 已是百分数，不再乘 100。
+        q.turnover_rate = _to_float(row.get("turnover_rate"))
+        if q.pre_close > 0:
+            q.change = q.close - q.pre_close
+            q.change_pct = q.change / q.pre_close * 100.0
+        q.currency = cls._CURRENCY.get(market, "")
+        return q
 
     # ------------------------------------------------------------------
     @classmethod

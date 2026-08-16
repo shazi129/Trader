@@ -284,8 +284,9 @@ def run_once(config_path: Path = DEFAULT_CONFIG_PATH) -> int:
         return 0
 
     _log.info("=" * 60)
-    _log.info("开始拉取 K 线: api=%s, today=%s, 共 %d 只",
-              cfg.api_name, today.strftime("%Y-%m-%d"), len(names))
+    _log.info("开始拉取 K 线: api=%s, adjustment=%s, today=%s, 共 %d 只",
+              cfg.api_name, QuoteAPIFactory.current_adjustment().value,
+              today.strftime("%Y-%m-%d"), len(names))
     _log.info("=" * 60)
 
     # 统一走 cached_api：内部按区间补齐 + 自动分批拉上游 + 自动写库。

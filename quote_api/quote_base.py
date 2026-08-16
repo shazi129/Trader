@@ -5,8 +5,30 @@ from __future__ import annotations
 
 import datetime
 import json
+from enum import Enum
 from pathlib import Path
 from typing import Optional
+
+
+class KlineAdjustment(str, Enum):
+    """历史 K 线复权方式。"""
+
+    NONE = "none"
+    QFQ = "qfq"
+    HFQ = "hfq"
+
+    @classmethod
+    def parse(cls, value: "KlineAdjustment | str | None") -> "KlineAdjustment":
+        if isinstance(value, cls):
+            return value
+        normalized = str(value or cls.NONE.value).strip().lower()
+        try:
+            return cls(normalized)
+        except ValueError as exc:
+            raise ValueError(
+                "unsupported K-line adjustment: %s; available: %s"
+                % (value, [item.value for item in cls])
+            ) from exc
 
 
 class DailyQuote:
@@ -125,7 +147,11 @@ class QuoteAPI:
     # 统一 HTTP 超时
     DEFAULT_TIMEOUT: int = 8
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        adjustment: KlineAdjustment | str = KlineAdjustment.NONE,
+    ) -> None:
+        self.adjustment = KlineAdjustment.parse(adjustment)
         # name_key -> override stock_code
         # 语义（三态）：
         #   - 缺 key            → 该源支持，使用 STOCK_META 中的默认 code

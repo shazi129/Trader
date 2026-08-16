@@ -18,7 +18,13 @@
     quotes = api.get_klines("Tencent", limit=500)  # 自动缓存
 """
 
-from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, StockFundamental
+from quote_api.quote_base import (
+    DailyQuote,
+    QuoteAPI,
+    DateLike,
+    StockFundamental,
+    KlineAdjustment,
+)
 from quote_api.quote_factory import QuoteAPIFactory, QuoteSource
 from quote_api.cached_api import CachedQuoteAPI
 from quote_api.futu import FutuQuoteAPI, FutuQuoteError
@@ -37,6 +43,7 @@ __all__ = [
     "StockFundamental",
     "QuoteAPI",
     "DateLike",
+    "KlineAdjustment",
     "QuoteAPIFactory",
     "QuoteSource",
     "CachedQuoteAPI",

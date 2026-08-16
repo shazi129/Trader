@@ -50,7 +50,8 @@
 ### 1. 数据源层 `quote_api/`
 
 - **`QuoteAPI`**（`quote_base.py`）：抽象基类，定义 `get_klines / get_daily_quote /
-  get_fundamentals` 三个接口。
+  get_fundamentals` 三个接口，并用 `KlineAdjustment` 统一不复权、
+  前复权和后复权的参数语义。
 - **多源实现**：每个 `quote_api/<provider>/` 自带 `config.json`；具体名单调用
   `QuoteAPIFactory.available_sources()` 获取
   保存 `name_key → 真实代码` 映射，作为「这个数据源支持哪些股票」的权威清单。

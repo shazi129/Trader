@@ -47,7 +47,7 @@ from typing import Optional
 import requests
 
 from quote_api.stock_meta import StockMarket
-from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike
+from quote_api.quote_base import DailyQuote, QuoteAPI, DateLike, KlineAdjustment
 from quote_api.stock_meta import get_meta
 
 
@@ -59,6 +59,10 @@ class SinaQuoteAPI(QuoteAPI):
         "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
         "CN_MarketData.getKLineData"
     )
+    _KLINE_RE_URL = (
+        "https://finance.sina.com.cn/realstock/newcompany/"
+        "{symbol}/p{direction}fq.js"
+    )
 
     _HEADERS = {
         "User-Agent": (
@@ -69,8 +73,11 @@ class SinaQuoteAPI(QuoteAPI):
         "Referer": "https://finance.sina.com.cn",
     }
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        adjustment: KlineAdjustment | str = KlineAdjustment.NONE,
+    ) -> None:
+        super().__init__(adjustment=adjustment)
         self._session = requests.Session()
         self._session.headers.update(self._HEADERS)
 
@@ -132,6 +139,11 @@ class SinaQuoteAPI(QuoteAPI):
         if not rows:
             return []
 
+        if self.adjustment != KlineAdjustment.NONE:
+            rows = self._apply_adjustment(stock.market, symbol, rows)
+            if not rows:
+                return []
+
         results: list[DailyQuote] = []
         for row in rows:
             q = self._row_to_quote(row, name, symbol)
@@ -176,6 +188,74 @@ class SinaQuoteAPI(QuoteAPI):
             print("[SinaQuoteAPI] kline request error: %s" % e)
             return []
         return []
+
+    # ------------------------------------------------------------------
+    def _apply_adjustment(
+        self,
+        market: StockMarket,
+        symbol: str,
+        rows: list[dict],
+    ) -> list[dict]:
+        """用新浪官方复权收盘序列缩放 OHLC。
+
+        新浪公开复权文件只覆盖 A 股。其他市场在请求前/后复权时
+        显式返回空，不把不复权数据冒充成复权数据。
+        """
+        if market not in (StockMarket.SH, StockMarket.SZ):
+            print(
+                "[SinaQuoteAPI] %s adjustment is not available for market %s"
+                % (self.adjustment.value, market.name)
+            )
+            return []
+
+        direction = "q" if self.adjustment == KlineAdjustment.QFQ else "h"
+        url = self._KLINE_RE_URL.format(symbol=symbol, direction=direction)
+        try:
+            resp = self._session.get(url, timeout=self.DEFAULT_TIMEOUT)
+            resp.raise_for_status()
+            text = resp.text
+        except Exception as e:
+            print("[SinaQuoteAPI] adjustment request error: %s" % e)
+            return []
+
+        adjusted_close = {
+            "%s-%s-%s" % match[:3]: float(match[3])
+            for match in re.findall(
+                r"_(\d{4})_(\d{2})_(\d{2}):\"([-+0-9.eE]+)\"",
+                text,
+            )
+        }
+        if not adjusted_close:
+            print(
+                "[SinaQuoteAPI] no %s adjustment data for %s"
+                % (self.adjustment.value, symbol)
+            )
+            return []
+
+        adjusted_rows: list[dict] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            date = str(row.get("day") or row.get("date") or "")[:10]
+            target_close = adjusted_close.get(date)
+            try:
+                raw_close = float(row.get("close") or 0)
+            except (TypeError, ValueError):
+                raw_close = 0.0
+            if target_close is None or raw_close <= 0:
+                continue
+
+            factor = target_close / raw_close
+            adjusted = dict(row)
+            for field in ("open", "high", "low", "close"):
+                try:
+                    adjusted[field] = float(row.get(field) or 0) * factor
+                except (TypeError, ValueError):
+                    adjusted[field] = 0.0
+            # 收盘价直接使用官方值，避免浮点乘法引入偏差。
+            adjusted["close"] = target_close
+            adjusted_rows.append(adjusted)
+        return adjusted_rows
 
     # ------------------------------------------------------------------
     # override：最新一条直接走实时接口
@@ -386,7 +466,11 @@ class SinaQuoteAPI(QuoteAPI):
 
     # ------------------------------------------------------------------
     @staticmethod
-    def _row_to_quote(row: dict, name: str, symbol: str) -> Optional[DailyQuote]:
+    def _row_to_quote(
+        row: dict,
+        name: str,
+        symbol: str,
+    ) -> Optional[DailyQuote]:
         if not isinstance(row, dict):
             return None
         try:

@@ -37,6 +37,15 @@
 省略 `api` 时使用 `QuoteAPIFactory.current_source()`；provider 如有额外运行环境
 要求，以其自身目录中的说明为准。
 
+历史 K 线复权方式在项目根目录 `config.py` 中统一配置：
+
+```python
+KLINE_ADJUSTMENT = "none"  # none=不复权，qfq=前复权，hfq=后复权
+```
+
+数据库只保存当前配置的一种复权口径；修改 `KLINE_ADJUSTMENT` 后需按框架流程
+重新拉取 K 线和因子。
+
 ### 起始日期优先级
 
 DB 最新日期 +1 天 > 该股票自己的 `earliest_date` > `StockInfo.listing_date`（不早于全局兜底）> 全局 `earliest_date`

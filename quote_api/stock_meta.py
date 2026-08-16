@@ -81,15 +81,15 @@ STOCK_META: dict[str, StockInfo] = {
     "Alibaba":       StockInfo('阿里-港',    '09988',  StockMarket.HK,          "2019-11-26"),
     "XiaoMi":        StockInfo('小米',       '01810',  StockMarket.HK,          "2018-07-23"),
 
-    "MouTai":        StockInfo('茅台',       '600519',  StockMarket.SH,          "2000-06-12"),
-    "GuoTou":        StockInfo('国投',       '600061',  StockMarket.SH,          "2000-06-12"),
+    "MaoTai":        StockInfo('茅台',       '600519',  StockMarket.SH,          "2000-06-12"),
+    "GuoTou":        StockInfo('国投资本',    '600061',  StockMarket.SH,          "2000-06-12"),
     "ICBC":          StockInfo('工商银行',    '601398',  StockMarket.SH,          "2006-10-27"),
 
     "NVIDIA":        StockInfo('英伟达',     'NVDA',   StockMarket.NASDAQ,      "2000-01-22"),
     "SNDK":          StockInfo('SNDK',       'SNDK',   StockMarket.NASDAQ,      "2000-01-01"),
     "APPLE":         StockInfo('苹果',       'AAPL',   StockMarket.NASDAQ,      "2000-12-12"),
     "GOOGLE":        StockInfo('谷歌',       'GOOG',   StockMarket.NASDAQ,      "2022-08-19"),
-    "AG":            StockInfo('白银',       'SI00Y',  StockMarket.FUTURES,     "2011-07-22"),
+    "AG":            StockInfo('白银ETF',    'SLV',    StockMarket.US,          "2006-04-21"),
 }
 
 

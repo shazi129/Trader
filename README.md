@@ -141,6 +141,7 @@ python tools/stock_widget/stock_widget.py
 | 位置 | 字段 | 说明 |
 |---|---|---|
 | `config.py` | `QUOTE_SOURCE` | 默认行情源；有效值见 `QuoteAPIFactory.available_sources()` |
+| `config.py` | `KLINE_ADJUSTMENT` | 历史 K 线复权方式：`none` / `qfq` / `hfq`，默认 `none` |
 | `quote_api/stock_meta.py` | `STOCK_META` | 全项目股票清单（`name_key → StockInfo`） |
 | `quote_api/<src>/config.json` | `stocks` 映射 | 该数据源支持的 `name_key → 真实代码` |
 | `tools/kline_fetcher/config.json` | `api / db_path / earliest_date / schedule_time / stocks` | 抓取行为 |
