@@ -87,8 +87,8 @@ STOCK_META: dict[str, StockInfo] = {
 
     "NVIDIA":        StockInfo('英伟达',     'NVDA',   StockMarket.NASDAQ,      "2000-01-22"),
     "SNDK":          StockInfo('SNDK',       'SNDK',   StockMarket.NASDAQ,      "2000-01-01"),
-    "AAPL":          StockInfo('苹果',       'AAPL',   StockMarket.NASDAQ,      "2000-12-12"),
-
+    "APPLE":         StockInfo('苹果',       'AAPL',   StockMarket.NASDAQ,      "2000-12-12"),
+    "GOOGLE":        StockInfo('谷歌',       'GOOG',   StockMarket.NASDAQ,      "2022-08-19"),
     "AG":            StockInfo('白银',       'SI00Y',  StockMarket.FUTURES,     "2011-07-22"),
 }
 
