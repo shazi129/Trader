@@ -46,6 +46,7 @@ from database.stock_db_utils import StockDB  # noqa: E402
 from quantitative.analyzer import (  # noqa: E402
     QuantFactorEngine,
     compute_probability,
+    compute_period_probabilities,
 )
 from quote_api.quote_base import DailyQuote  # noqa: E402
 
@@ -105,10 +106,16 @@ def _compute_daily_strength(quotes: list[DailyQuote], days: int
             prob_up, prob_down, trend = compute_probability(factors)
             strength = (prob_up - 0.5) / 0.35
             strength = max(-1.0, min(1.0, strength))
+            period_probs = compute_period_probabilities(factors)
+            period_net = {
+                k: round(period_probs[k]["net_strength"], 4)
+                for k in ("short", "medium", "long")
+            }
         except Exception:  # noqa: BLE001
             # 早期窗口因子不足等异常，强度记为 0（中性）
             prob_up, prob_down, trend = 0.5, 0.5, "数据不足"
             strength = 0.0
+            period_net = {"short": 0.0, "medium": 0.0, "long": 0.0}
 
         out.append({
             "date": q.date,
@@ -120,6 +127,8 @@ def _compute_daily_strength(quotes: list[DailyQuote], days: int
             "net_strength": round(prob_up - prob_down, 4),
             # 归一化信号（保留兼容，与 net_strength 同号，仅尺度不同）
             "strength": round(strength, 4),
+            # 分周期净强度（短/中/长），供前端渲染三根红绿柱
+            "period_net": period_net,
             "trend": trend,
         })
     return out

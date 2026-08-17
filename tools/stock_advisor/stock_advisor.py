@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import subprocess
 import sys
 from contextlib import closing
 from pathlib import Path
@@ -38,6 +39,7 @@ from quantitative.analyzer import (  # noqa: E402
     AnalysisReport,
     QuantFactorEngine,
     compute_probability,
+    compute_period_probabilities,
     generate_summary,
 )
 from quantitative.factor_batch import compute_and_save_factors  # noqa: E402
@@ -172,6 +174,38 @@ def _build_markdown(report: AnalysisReport,
                  "无期限含义。下一节的"
                  "「多周期预测」才是基于历史相似态给出的未来 N 天上涨概率。")
     lines.append("")
+
+    # ---- 分周期（短/中/长）因子聚合 ----
+    # 复用第 1 节的因子快照，按周期桶（FACTOR_BUCKET）重新加权聚合，
+    # 权重优先取 period_weights.json（由 optimize_period_weights.py 生成），
+    # 未生成时回退到因子自带权重。这给出"短线 / 中线 / 长线"三个维度的多空判断。
+    lines.append("## 1.1 分周期因子判断（短 / 中 / 长）")
+    lines.append("")
+    lines.append("> 把同一批因子按**预测周期**分成短(≤20日) / 中(≤60日) / 长(>60日)"
+                 "三桶，分别加权聚合。同一天可能出现「短线偏多、长线偏空」的分化，"
+                 "反映不同持有周期下的多空力量差异。")
+    lines.append("")
+    pp = report.period_probs or {}
+    if pp:
+        _PP_LABELS = {"short": "短线(≤20日)", "medium": "中线(≤60日)", "long": "长线(>60日)"}
+        lines.append("| 周期 | 净强度 | 上涨概率 | 下跌概率 | 趋势 |")
+        lines.append("|------|--------|----------|----------|------|")
+        for key in ("short", "medium", "long"):
+            d = pp.get(key)
+            if not d:
+                continue
+            icon = _direction_icon(d.get("prob_up"))
+            lines.append(
+                f"| {icon} {_PP_LABELS.get(key, key)} "
+                f"| {d['net_strength']:+.3f} "
+                f"| {d['prob_up'] * 100:.1f}% "
+                f"| {d['prob_down'] * 100:.1f}% "
+                f"| {d['trend']} |"
+            )
+        lines.append("")
+    else:
+        lines.append("> 暂无分周期因子数据。")
+        lines.append("")
 
     # ---- 多周期预测（来自 HorizonBacktester）----
     lines.append("## 2. 多周期涨跌预测（历史相似态回测）")
@@ -604,6 +638,9 @@ def analyze_stock(name_key: str, *, api: Optional[str] = None,
     factors = engine.compute_all()
     prob_up, prob_down, trend = compute_probability(factors)
 
+    # 2b. 分周期（短/中/长）聚合，使用 period_weights.json（若已生成）
+    period_probs = compute_period_probabilities(factors)
+
     report = AnalysisReport(
         stock_name=stock_info.name,
         name_key=name_key,
@@ -616,6 +653,7 @@ def analyze_stock(name_key: str, *, api: Optional[str] = None,
         trend=trend,
         probability_up=prob_up,
         probability_down=prob_down,
+        period_probs=period_probs,
     )
     report.summary = generate_summary(report)
 
@@ -671,6 +709,34 @@ def analyze_stock(name_key: str, *, api: Optional[str] = None,
 
 
 # ===========================================================================
+# 权重重生成
+# ===========================================================================
+
+def _regenerate_period_weights(db_path: Optional[str] = None) -> bool:
+    """调用 quantitative/analyzer/optimize_period_weights.py 重新生成
+    分周期因子权重（period_weights.json）。
+
+    该脚本会遍历 config.global_stock_list 全部股票，按 5 个预测周期算
+    横截面 Rank IC，再按桶取 |ICIR| 最大档定权，输出到 analyzer 目录。
+    """
+    target = _ROOT / "quantitative" / "analyzer" / "optimize_period_weights.py"
+    if not target.exists():
+        _log.error("未找到权重优化脚本: %s", target)
+        return False
+
+    cmd = [sys.executable, str(target)]
+    if db_path:
+        cmd.extend(["--db", db_path])
+    _log.info("运行权重优化: %s", " ".join(cmd))
+    try:
+        proc = subprocess.run(cmd, cwd=str(_ROOT), check=False)
+    except Exception as e:  # noqa: BLE001
+        _log.error("权重优化脚本执行异常: %s", e)
+        return False
+    return proc.returncode == 0
+
+
+# ===========================================================================
 # CLI
 # ===========================================================================
 
@@ -694,10 +760,18 @@ def main() -> int:
                         help="不落盘 markdown，仅控制台输出")
     parser.add_argument("--force-refresh", action="store_true",
                         help="强制从 API 重新拉算因子（忽略 DB 缓存）")
+    parser.add_argument("--regen-weights", action="store_true",
+                        help="重新生成分周期因子权重（period_weights.json）"
+                             "后，再出报告")
     parser.add_argument("--report-dir", help="自定义报告目录")
     args = parser.parse_args()
 
     report_dir = Path(args.report_dir) if args.report_dir else None
+
+    # 可选：先重生成分周期权重（基于全股票池的 Rank IC）
+    if args.regen_weights:
+        _regenerate_period_weights(args.db)
+        print("\n分周期权重已重算，继续出报告……\n")
 
     try:
         path = analyze_stock(

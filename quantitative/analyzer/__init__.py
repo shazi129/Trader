@@ -9,7 +9,12 @@
     )
 """
 
-from .scoring import FactorResult, AnalysisReport, compute_probability
+from .scoring import (
+    FactorResult,
+    AnalysisReport,
+    compute_probability,
+    compute_period_probabilities,
+)
 from .report import generate_summary
 from .factors import QuantFactorEngine
 from .analyzer import QuantAnalyzer
@@ -18,6 +23,7 @@ __all__ = [
     "FactorResult",
     "AnalysisReport",
     "compute_probability",
+    "compute_period_probabilities",
     "generate_summary",
     "QuantFactorEngine",
     "QuantAnalyzer",
