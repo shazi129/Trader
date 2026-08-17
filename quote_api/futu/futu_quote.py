@@ -60,7 +60,7 @@ class FutuQuoteAPI(QuoteAPI):
     SOURCE = "futu"
 
     DEFAULT_HOST = "127.0.0.1"
-    DEFAULT_PORT = 11111
+    DEFAULT_PORT = 22222
     PAGE_SIZE = 1000
 
     _MARKET_PREFIX = {
