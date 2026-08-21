@@ -9,9 +9,17 @@
 3. 特征落后于行情时，通过 ``FeatureCalculator`` 统一重算并写回
 4. 用 ``QuantitativeAnalysisService`` 判断形态；用 ``HorizonBacktester`` 跑
    历史相似态匹配，得出 5/20/60 日上涨概率
-5. 输出 markdown 到 ``tools/stock_advisor/reports/``
+5. 按校准可靠性融合形态模型与历史相似态模型
+6. 输出 markdown 到 ``tools/stock_advisor/reports/``
 """
 
 from .backtester import HorizonBacktester, HorizonForecast  # noqa: F401
+from .fusion import FusedForecast, FusedHorizonForecast, fuse_forecasts  # noqa: F401
 
-__all__ = ["HorizonBacktester", "HorizonForecast"]
+__all__ = [
+    "FusedForecast",
+    "FusedHorizonForecast",
+    "HorizonBacktester",
+    "HorizonForecast",
+    "fuse_forecasts",
+]

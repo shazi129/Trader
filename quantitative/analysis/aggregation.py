@@ -5,7 +5,78 @@ from __future__ import annotations
 from quantitative.backtesting.models import BacktestArtifact, HORIZONS
 from quantitative.signals import SignalResult
 
-from .models import HorizonAnalysis
+from .models import HorizonAnalysis, SignalContribution
+
+
+def signal_contributions(
+    signals: list[SignalResult],
+    artifact: BacktestArtifact,
+    horizon: int,
+) -> list[SignalContribution]:
+    """Explain each active signal using exactly the production aggregation math."""
+    prepared: list[tuple[SignalResult, float, int, float, float, float, bool]] = []
+    denominator = 0.0
+    for signal in (item for item in signals if item.active):
+        metric = artifact.metric(signal.signal_id, horizon)
+        used_fallback = metric is None or metric.samples == 0
+        if used_fallback:
+            success_rate = 0.55
+            samples = 0
+            weight = 0.05
+            calibrated_success_rate = success_rate
+        else:
+            success_rate = metric.success_rate
+            samples = metric.samples
+            weight = metric.weight
+            sample_reliability = samples / (samples + 50.0)
+            calibrated_success_rate = (
+                0.5 + (success_rate - 0.5) * sample_reliability
+            )
+        if weight <= 0:
+            continue
+        probability_up = (
+            calibrated_success_rate
+            if signal.direction > 0
+            else 1.0 - calibrated_success_rate
+        )
+        effective_weight = weight * max(signal.strength, 0.0)
+        denominator += effective_weight
+        prepared.append((
+            signal,
+            success_rate,
+            samples,
+            weight,
+            probability_up,
+            effective_weight,
+            used_fallback,
+        ))
+
+    result: list[SignalContribution] = []
+    for (
+        signal,
+        success_rate,
+        samples,
+        weight,
+        probability_up,
+        effective_weight,
+        used_fallback,
+    ) in prepared:
+        weight_share = effective_weight / denominator if denominator else 0.0
+        result.append(SignalContribution(
+            signal_id=signal.signal_id,
+            name=signal.name,
+            category=signal.category,
+            nominal_direction=signal.direction,
+            success_rate=success_rate,
+            samples=samples,
+            backtest_weight=weight,
+            effective_probability_up=probability_up,
+            effective_weight=effective_weight,
+            weight_share=weight_share,
+            probability_point_contribution=(probability_up - 0.5) * weight_share,
+            used_fallback=used_fallback,
+        ))
+    return result
 
 
 def aggregate_signals(
@@ -13,29 +84,15 @@ def aggregate_signals(
     artifact: BacktestArtifact,
     horizons: tuple[int, ...] = HORIZONS,
 ) -> dict[int, HorizonAnalysis]:
-    active = [signal for signal in signals if signal.active]
     result: dict[int, HorizonAnalysis] = {}
     for horizon in horizons:
-        numerator = 0.0
-        denominator = 0.0
-        contributors = 0
-        for signal in active:
-            metric = artifact.metric(signal.signal_id, horizon)
-            if metric is None or metric.samples == 0:
-                success_rate = 0.55
-                weight = 0.05
-            else:
-                success_rate = metric.success_rate
-                weight = metric.weight
-            if weight <= 0:
-                continue
-            probability_up = (
-                success_rate if signal.direction > 0 else 1.0 - success_rate
-            )
-            effective_weight = weight * max(signal.strength, 0.0)
-            numerator += probability_up * effective_weight
-            denominator += effective_weight
-            contributors += 1
+        contributions = signal_contributions(signals, artifact, horizon)
+        denominator = sum(item.effective_weight for item in contributions)
+        numerator = sum(
+            item.effective_probability_up * item.effective_weight
+            for item in contributions
+        )
+        contributors = len(contributions)
         probability_up = numerator / denominator if denominator else 0.5
         probability_up = max(0.05, min(0.95, probability_up))
         confidence = min(1.0, denominator / max(contributors, 1))
@@ -49,4 +106,4 @@ def aggregate_signals(
     return result
 
 
-__all__ = ["aggregate_signals"]
+__all__ = ["aggregate_signals", "signal_contributions"]

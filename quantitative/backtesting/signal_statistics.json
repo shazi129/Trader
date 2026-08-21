@@ -1,6 +1,6 @@
 {
   "model_version": "signal_model_v1",
-  "generated_at": "2026-08-21T12:18:32",
+  "generated_at": "2026-08-21T13:24:15",
   "horizons": [
     5,
     20,
@@ -21,6 +21,66 @@
   ],
   "data_cutoff": "2026-08-20",
   "metrics": {
+    "bearish_price_volume_divergence": {
+      "5": {
+        "samples": 5624,
+        "successes": 2758,
+        "success_rate": 0.490398,
+        "weight": 0.019034
+      },
+      "20": {
+        "samples": 5624,
+        "successes": 2639,
+        "success_rate": 0.469239,
+        "weight": 0.06098
+      },
+      "60": {
+        "samples": 5624,
+        "successes": 2343,
+        "success_rate": 0.416607,
+        "weight": 0.165315
+      }
+    },
+    "bearish_volume_expansion": {
+      "5": {
+        "samples": 3299,
+        "successes": 1531,
+        "success_rate": 0.46408,
+        "weight": 0.070767
+      },
+      "20": {
+        "samples": 3299,
+        "successes": 1507,
+        "success_rate": 0.456805,
+        "weight": 0.0851
+      },
+      "60": {
+        "samples": 3299,
+        "successes": 1455,
+        "success_rate": 0.441043,
+        "weight": 0.116154
+      }
+    },
+    "bollinger_lower_reentry": {
+      "5": {
+        "samples": 856,
+        "successes": 433,
+        "success_rate": 0.505841,
+        "weight": 0.011038
+      },
+      "20": {
+        "samples": 856,
+        "successes": 449,
+        "success_rate": 0.524533,
+        "weight": 0.046358
+      },
+      "60": {
+        "samples": 856,
+        "successes": 458,
+        "success_rate": 0.535047,
+        "weight": 0.066225
+      }
+    },
     "bollinger_lower_touch": {
       "5": {
         "samples": 6670,
@@ -39,6 +99,66 @@
         "successes": 3606,
         "success_rate": 0.54063,
         "weight": 0.080655
+      }
+    },
+    "bollinger_squeeze_breakout_down": {
+      "5": {
+        "samples": 382,
+        "successes": 194,
+        "success_rate": 0.507853,
+        "weight": 0.013889
+      },
+      "20": {
+        "samples": 382,
+        "successes": 170,
+        "success_rate": 0.445026,
+        "weight": 0.097222
+      },
+      "60": {
+        "samples": 382,
+        "successes": 168,
+        "success_rate": 0.439791,
+        "weight": 0.106481
+      }
+    },
+    "bollinger_squeeze_breakout_up": {
+      "5": {
+        "samples": 475,
+        "successes": 263,
+        "success_rate": 0.553684,
+        "weight": 0.097143
+      },
+      "20": {
+        "samples": 475,
+        "successes": 274,
+        "success_rate": 0.576842,
+        "weight": 0.139048
+      },
+      "60": {
+        "samples": 475,
+        "successes": 281,
+        "success_rate": 0.591579,
+        "weight": 0.165714
+      }
+    },
+    "bollinger_upper_reentry": {
+      "5": {
+        "samples": 1158,
+        "successes": 527,
+        "success_rate": 0.455095,
+        "weight": 0.086093
+      },
+      "20": {
+        "samples": 1158,
+        "successes": 524,
+        "success_rate": 0.452504,
+        "weight": 0.09106
+      },
+      "60": {
+        "samples": 1158,
+        "successes": 515,
+        "success_rate": 0.444732,
+        "weight": 0.10596
       }
     },
     "bollinger_upper_touch": {
@@ -81,6 +201,166 @@
         "weight": 0.080216
       }
     },
+    "cci_20_breakout_down": {
+      "5": {
+        "samples": 1501,
+        "successes": 732,
+        "success_rate": 0.487675,
+        "weight": 0.023856
+      },
+      "20": {
+        "samples": 1501,
+        "successes": 698,
+        "success_rate": 0.465023,
+        "weight": 0.067698
+      },
+      "60": {
+        "samples": 1501,
+        "successes": 714,
+        "success_rate": 0.475683,
+        "weight": 0.047066
+      }
+    },
+    "cci_20_breakout_up": {
+      "5": {
+        "samples": 1713,
+        "successes": 924,
+        "success_rate": 0.539405,
+        "weight": 0.076574
+      },
+      "20": {
+        "samples": 1713,
+        "successes": 949,
+        "success_rate": 0.553999,
+        "weight": 0.104935
+      },
+      "60": {
+        "samples": 1713,
+        "successes": 996,
+        "success_rate": 0.581436,
+        "weight": 0.158253
+      }
+    },
+    "cci_20_overbought_exit": {
+      "5": {
+        "samples": 1713,
+        "successes": 851,
+        "success_rate": 0.496789,
+        "weight": 0.006239
+      },
+      "20": {
+        "samples": 1713,
+        "successes": 795,
+        "success_rate": 0.464098,
+        "weight": 0.069767
+      },
+      "60": {
+        "samples": 1713,
+        "successes": 764,
+        "success_rate": 0.446001,
+        "weight": 0.104935
+      }
+    },
+    "cci_20_oversold_exit": {
+      "5": {
+        "samples": 1502,
+        "successes": 774,
+        "success_rate": 0.515313,
+        "weight": 0.029639
+      },
+      "20": {
+        "samples": 1502,
+        "successes": 810,
+        "success_rate": 0.539281,
+        "weight": 0.076031
+      },
+      "60": {
+        "samples": 1502,
+        "successes": 805,
+        "success_rate": 0.535952,
+        "weight": 0.069588
+      }
+    },
+    "dmi_bearish_cross": {
+      "5": {
+        "samples": 255,
+        "successes": 112,
+        "success_rate": 0.439216,
+        "weight": 0.101639
+      },
+      "20": {
+        "samples": 255,
+        "successes": 111,
+        "success_rate": 0.435294,
+        "weight": 0.108197
+      },
+      "60": {
+        "samples": 255,
+        "successes": 107,
+        "success_rate": 0.419608,
+        "weight": 0.134426
+      }
+    },
+    "dmi_bullish_cross": {
+      "5": {
+        "samples": 219,
+        "successes": 117,
+        "success_rate": 0.534247,
+        "weight": 0.055762
+      },
+      "20": {
+        "samples": 219,
+        "successes": 109,
+        "success_rate": 0.497717,
+        "weight": 0.003717
+      },
+      "60": {
+        "samples": 219,
+        "successes": 125,
+        "success_rate": 0.570776,
+        "weight": 0.115242
+      }
+    },
+    "kdj_overbought_death_cross": {
+      "5": {
+        "samples": 947,
+        "successes": 428,
+        "success_rate": 0.451954,
+        "weight": 0.091274
+      },
+      "20": {
+        "samples": 947,
+        "successes": 405,
+        "success_rate": 0.427666,
+        "weight": 0.137412
+      },
+      "60": {
+        "samples": 947,
+        "successes": 406,
+        "success_rate": 0.428722,
+        "weight": 0.135406
+      }
+    },
+    "kdj_oversold_golden_cross": {
+      "5": {
+        "samples": 752,
+        "successes": 392,
+        "success_rate": 0.521277,
+        "weight": 0.0399
+      },
+      "20": {
+        "samples": 752,
+        "successes": 398,
+        "success_rate": 0.529255,
+        "weight": 0.054863
+      },
+      "60": {
+        "samples": 752,
+        "successes": 396,
+        "success_rate": 0.526596,
+        "weight": 0.049875
+      }
+    },
     "ma_5_20_death_cross": {
       "5": {
         "samples": 1039,
@@ -118,6 +398,46 @@
         "samples": 1039,
         "successes": 580,
         "success_rate": 0.558229,
+        "weight": 0.111111
+      }
+    },
+    "ma_60_200_death_cross": {
+      "5": {
+        "samples": 80,
+        "successes": 42,
+        "success_rate": 0.525,
+        "weight": 0.030769
+      },
+      "20": {
+        "samples": 80,
+        "successes": 50,
+        "success_rate": 0.625,
+        "weight": 0.153846
+      },
+      "60": {
+        "samples": 80,
+        "successes": 34,
+        "success_rate": 0.425,
+        "weight": 0.092308
+      }
+    },
+    "ma_60_200_golden_cross": {
+      "5": {
+        "samples": 76,
+        "successes": 40,
+        "success_rate": 0.526316,
+        "weight": 0.031746
+      },
+      "20": {
+        "samples": 76,
+        "successes": 45,
+        "success_rate": 0.592105,
+        "weight": 0.111111
+      },
+      "60": {
+        "samples": 76,
+        "successes": 45,
+        "success_rate": 0.592105,
         "weight": 0.111111
       }
     },
@@ -221,6 +541,46 @@
         "weight": 0.15572
       }
     },
+    "macd_hist_bearish_reexpand": {
+      "5": {
+        "samples": 1488,
+        "successes": 729,
+        "success_rate": 0.489919,
+        "weight": 0.019506
+      },
+      "20": {
+        "samples": 1488,
+        "successes": 705,
+        "success_rate": 0.47379,
+        "weight": 0.050715
+      },
+      "60": {
+        "samples": 1488,
+        "successes": 671,
+        "success_rate": 0.450941,
+        "weight": 0.094928
+      }
+    },
+    "macd_hist_bullish_reexpand": {
+      "5": {
+        "samples": 1715,
+        "successes": 904,
+        "success_rate": 0.527114,
+        "weight": 0.052691
+      },
+      "20": {
+        "samples": 1715,
+        "successes": 922,
+        "success_rate": 0.537609,
+        "weight": 0.073088
+      },
+      "60": {
+        "samples": 1715,
+        "successes": 953,
+        "success_rate": 0.555685,
+        "weight": 0.108215
+      }
+    },
     "macd_top_divergence": {
       "5": {
         "samples": 2610,
@@ -239,6 +599,126 @@
         "successes": 1006,
         "success_rate": 0.385441,
         "weight": 0.224812
+      }
+    },
+    "macd_zero_cross_down": {
+      "5": {
+        "samples": 558,
+        "successes": 277,
+        "success_rate": 0.496416,
+        "weight": 0.006579
+      },
+      "20": {
+        "samples": 558,
+        "successes": 269,
+        "success_rate": 0.482079,
+        "weight": 0.032895
+      },
+      "60": {
+        "samples": 558,
+        "successes": 269,
+        "success_rate": 0.482079,
+        "weight": 0.032895
+      }
+    },
+    "macd_zero_cross_up": {
+      "5": {
+        "samples": 557,
+        "successes": 267,
+        "success_rate": 0.479354,
+        "weight": 0.037891
+      },
+      "20": {
+        "samples": 557,
+        "successes": 288,
+        "success_rate": 0.517056,
+        "weight": 0.031301
+      },
+      "60": {
+        "samples": 557,
+        "successes": 315,
+        "success_rate": 0.56553,
+        "weight": 0.120264
+      }
+    },
+    "mfi_14_overbought_exit": {
+      "5": {
+        "samples": 415,
+        "successes": 196,
+        "success_rate": 0.472289,
+        "weight": 0.049462
+      },
+      "20": {
+        "samples": 415,
+        "successes": 179,
+        "success_rate": 0.431325,
+        "weight": 0.122581
+      },
+      "60": {
+        "samples": 415,
+        "successes": 173,
+        "success_rate": 0.416867,
+        "weight": 0.148387
+      }
+    },
+    "mfi_14_oversold_exit": {
+      "5": {
+        "samples": 216,
+        "successes": 114,
+        "success_rate": 0.527778,
+        "weight": 0.045113
+      },
+      "20": {
+        "samples": 216,
+        "successes": 110,
+        "success_rate": 0.509259,
+        "weight": 0.015038
+      },
+      "60": {
+        "samples": 216,
+        "successes": 113,
+        "success_rate": 0.523148,
+        "weight": 0.037594
+      }
+    },
+    "mfi_bottom_divergence": {
+      "5": {
+        "samples": 3110,
+        "successes": 1508,
+        "success_rate": 0.484887,
+        "weight": 0.029747
+      },
+      "20": {
+        "samples": 3110,
+        "successes": 1604,
+        "success_rate": 0.515756,
+        "weight": 0.031013
+      },
+      "60": {
+        "samples": 3110,
+        "successes": 1726,
+        "success_rate": 0.554984,
+        "weight": 0.108228
+      }
+    },
+    "mfi_top_divergence": {
+      "5": {
+        "samples": 4035,
+        "successes": 1898,
+        "success_rate": 0.470384,
+        "weight": 0.058507
+      },
+      "20": {
+        "samples": 4035,
+        "successes": 1683,
+        "success_rate": 0.4171,
+        "weight": 0.16377
+      },
+      "60": {
+        "samples": 4035,
+        "successes": 1618,
+        "success_rate": 0.400991,
+        "weight": 0.195594
       }
     },
     "momentum_20_negative": {
@@ -281,6 +761,46 @@
         "weight": 0.149083
       }
     },
+    "obv_bottom_divergence": {
+      "5": {
+        "samples": 2289,
+        "successes": 1153,
+        "success_rate": 0.503713,
+        "weight": 0.007268
+      },
+      "20": {
+        "samples": 2289,
+        "successes": 1174,
+        "success_rate": 0.512888,
+        "weight": 0.025224
+      },
+      "60": {
+        "samples": 2289,
+        "successes": 1244,
+        "success_rate": 0.543469,
+        "weight": 0.085079
+      }
+    },
+    "obv_top_divergence": {
+      "5": {
+        "samples": 2000,
+        "successes": 888,
+        "success_rate": 0.444,
+        "weight": 0.109268
+      },
+      "20": {
+        "samples": 2000,
+        "successes": 797,
+        "success_rate": 0.3985,
+        "weight": 0.198049
+      },
+      "60": {
+        "samples": 2000,
+        "successes": 731,
+        "success_rate": 0.3655,
+        "weight": 0.262439
+      }
+    },
     "price_double_bottom": {
       "5": {
         "samples": 2362,
@@ -321,6 +841,46 @@
         "weight": 0.0208
       }
     },
+    "price_ma_20_cross_down": {
+      "5": {
+        "samples": 1891,
+        "successes": 953,
+        "success_rate": 0.503966,
+        "weight": 0.007728
+      },
+      "20": {
+        "samples": 1891,
+        "successes": 916,
+        "success_rate": 0.4844,
+        "weight": 0.030397
+      },
+      "60": {
+        "samples": 1891,
+        "successes": 855,
+        "success_rate": 0.452142,
+        "weight": 0.093251
+      }
+    },
+    "price_ma_20_cross_up": {
+      "5": {
+        "samples": 1890,
+        "successes": 989,
+        "success_rate": 0.52328,
+        "weight": 0.045361
+      },
+      "20": {
+        "samples": 1890,
+        "successes": 1015,
+        "success_rate": 0.537037,
+        "weight": 0.072165
+      },
+      "60": {
+        "samples": 1890,
+        "successes": 1064,
+        "success_rate": 0.562963,
+        "weight": 0.12268
+      }
+    },
     "rsi_14_overbought": {
       "5": {
         "samples": 2807,
@@ -339,6 +899,26 @@
         "successes": 1226,
         "success_rate": 0.436765,
         "weight": 0.124256
+      }
+    },
+    "rsi_14_overbought_exit": {
+      "5": {
+        "samples": 701,
+        "successes": 321,
+        "success_rate": 0.457917,
+        "weight": 0.078562
+      },
+      "20": {
+        "samples": 701,
+        "successes": 303,
+        "success_rate": 0.43224,
+        "weight": 0.126498
+      },
+      "60": {
+        "samples": 701,
+        "successes": 302,
+        "success_rate": 0.430813,
+        "weight": 0.129161
       }
     },
     "rsi_14_oversold": {
@@ -361,6 +941,66 @@
         "weight": 0.18958
       }
     },
+    "rsi_14_oversold_exit": {
+      "5": {
+        "samples": 369,
+        "successes": 194,
+        "success_rate": 0.525745,
+        "weight": 0.045346
+      },
+      "20": {
+        "samples": 369,
+        "successes": 187,
+        "success_rate": 0.506775,
+        "weight": 0.011933
+      },
+      "60": {
+        "samples": 369,
+        "successes": 201,
+        "success_rate": 0.544715,
+        "weight": 0.078759
+      }
+    },
+    "rsi_bottom_divergence": {
+      "5": {
+        "samples": 2064,
+        "successes": 1024,
+        "success_rate": 0.496124,
+        "weight": 0.007569
+      },
+      "20": {
+        "samples": 2064,
+        "successes": 1055,
+        "success_rate": 0.511143,
+        "weight": 0.02176
+      },
+      "60": {
+        "samples": 2064,
+        "successes": 1163,
+        "success_rate": 0.563469,
+        "weight": 0.123936
+      }
+    },
+    "rsi_top_divergence": {
+      "5": {
+        "samples": 2851,
+        "successes": 1285,
+        "success_rate": 0.450719,
+        "weight": 0.096863
+      },
+      "20": {
+        "samples": 2851,
+        "successes": 1240,
+        "success_rate": 0.434935,
+        "weight": 0.127887
+      },
+      "60": {
+        "samples": 2851,
+        "successes": 1108,
+        "success_rate": 0.388636,
+        "weight": 0.21889
+      }
+    },
     "volatility_contraction": {
       "5": {
         "samples": 12665,
@@ -379,6 +1019,46 @@
         "successes": 6681,
         "success_rate": 0.527517,
         "weight": 0.054817
+      }
+    },
+    "williams_r_14_overbought_exit": {
+      "5": {
+        "samples": 2509,
+        "successes": 1209,
+        "success_rate": 0.481865,
+        "weight": 0.035561
+      },
+      "20": {
+        "samples": 2509,
+        "successes": 1184,
+        "success_rate": 0.471901,
+        "weight": 0.0551
+      },
+      "60": {
+        "samples": 2509,
+        "successes": 1072,
+        "success_rate": 0.427262,
+        "weight": 0.142634
+      }
+    },
+    "williams_r_14_oversold_exit": {
+      "5": {
+        "samples": 2209,
+        "successes": 1117,
+        "success_rate": 0.505659,
+        "weight": 0.011067
+      },
+      "20": {
+        "samples": 2209,
+        "successes": 1168,
+        "success_rate": 0.528746,
+        "weight": 0.05622
+      },
+      "60": {
+        "samples": 2209,
+        "successes": 1193,
+        "success_rate": 0.540063,
+        "weight": 0.078353
       }
     }
   }

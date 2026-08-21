@@ -11,12 +11,14 @@
    构成 K 维向量 v。这组特征要求同一时间点都有有效值且数值稳定。
 2. 用整段历史序列算每个特征的均值 / 方差，把每一天的 v 归一化成 z 分数。
    ──这样不同量纲的特征能一起算距离。
-3. 当前时刻 v_now 对历史每一天 v_hist[t] 求欧氏距离 d[t]；
-   取 top_k 个最相似的日期（排除距今 ``max(horizons)`` 天内避免未来函数）。
-4. 对这些"相似日"看未来 horizon 天后的收益 r_t = close[t+h]/close[t] - 1：
-   - 上涨概率 P_up = mean( r_t > 0 )
-   - 期望收益 E[r] = mean(r_t)
-5. 同一组相似日对 5/20/60 三个 horizon 分别统计，得到三档预测。
+3. 当前时刻 v_now 对历史每一天 v_hist[t] 求标准化欧氏距离 d[t]；每个 horizon
+   只允许使用当时已经拥有未来结果的历史日期，避免未来函数。
+4. 取 top_k 个相似日期并使用自适应 Gaussian kernel 按距离赋权；越相似的日期
+   对上涨概率和期望收益贡献越大。
+5. 用 Kish 有效样本量和“近邻距离相对全样本距离”的质量指标，把原始概率向
+   50% 中性先验收缩。
+6. 在互不重叠的历史锚点上逐时点重跑上述预测，以 Brier score 相对 50/50
+   基准的技能决定该模型能否及以多大权重进入最终融合。
 
 为什么不用 sklearn
 ------------------
@@ -27,7 +29,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from quantitative.features import FeatureSnapshot
@@ -52,6 +54,14 @@ class HorizonForecast:
     avg_positive: float         # 相似样本中上涨样本的平均涨幅
     avg_negative: float         # 相似样本中下跌样本的平均跌幅
     reason: str                 # 相似态摘要
+    raw_prob_up: float = 0.5    # 距离加权但尚未收缩的上涨概率
+    effective_sample_size: float = 0.0
+    mean_distance: float = 0.0
+    sample_confidence: float = 0.0
+    calibration_samples: int = 0
+    calibration_brier: Optional[float] = None
+    calibration_skill: float = 0.0
+    confidence: float = 0.0     # 进入模型融合的最终可靠性权重
 
 
 @dataclass
@@ -62,6 +72,28 @@ class MultiHorizonForecast:
     long: Optional[HorizonForecast]
     top_similar_dates: list[str]  # 命中了哪些历史日期（供报告引用）
     feature_contribution: dict[str, float]  # 特征 z 距离贡献度
+    similar_dates_by_horizon: dict[int, list[str]] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _NeighborStats:
+    probability_up: float
+    raw_probability_up: float
+    expected_return: float
+    average_positive: float
+    average_negative: float
+    sample_size: int
+    effective_sample_size: float
+    mean_distance: float
+    sample_confidence: float
+    indices: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _Calibration:
+    samples: int = 0
+    brier_score: Optional[float] = None
+    skill: float = 0.0
 
 
 # ===========================================================================
@@ -166,54 +198,77 @@ class HorizonBacktester:
             _log.warning("有效样本太少（%d 条），回测跳过", len(valid_idx))
             return None
 
-        # 2. 归一化：每维求全历史 mean/std，转 z-score
+        # 2. 当前时点的归一化统计只使用截至当前的可见数据。
         feat_mean, feat_std = self._compute_feat_stats(vectors, valid_idx)
 
-        # 3. 最后一根 K 线是 "now"；历史样本必须留出 max(horizons) 的未来空间
+        # 3. 最后一根 K 线是 "now"；每个周期分别排除尚无未来结果的样本。
         now_idx = self.n - 1
         if vectors[now_idx] is None:
             _log.warning("最新 K 线的特征向量缺失，回测跳过")
             return None
         v_now_z = self._zscore(vectors[now_idx], feat_mean, feat_std)
 
-        max_h = max(horizons)
-        history_pool = [
-            i for i in valid_idx if i <= now_idx - max_h
-        ]
-        if len(history_pool) < top_k * 2:
-            _log.warning("可用历史样本 %d 少于 2×top_k=%d，回测跳过",
-                         len(history_pool), 2 * top_k)
+        # 4. 每个周期分别执行距离加权、概率收缩和逐时点校准。
+        horizon_result: dict[int, HorizonForecast] = {}
+        dates_by_horizon: dict[int, list[str]] = {}
+        for h in horizons:
+            stats = self._neighbor_stats(
+                vectors,
+                valid_idx,
+                anchor_idx=now_idx,
+                horizon=h,
+                top_k=top_k,
+                std=feat_std,
+            )
+            if stats is None:
+                continue
+            calibration = self._calibrate(
+                vectors,
+                valid_idx,
+                horizon=h,
+                top_k=top_k,
+                now_idx=now_idx,
+            )
+            calibration_size_factor = (
+                calibration.samples / (calibration.samples + 20.0)
+                if calibration.samples
+                else 0.0
+            )
+            confidence = (
+                stats.sample_confidence
+                * calibration.skill
+                * calibration_size_factor
+            )
+            horizon_result[h] = self._build_horizon_forecast(
+                h,
+                stats,
+                calibration,
+                confidence,
+            )
+            dates_by_horizon[h] = [
+                self.aligned[index][0].date for index in stats.indices[:10]
+            ]
+
+        if not horizon_result:
+            _log.warning("各周期均无足够的历史相似样本，回测跳过")
             return None
 
-        # 4. 计算距离，取 top_k 最相似日
-        dist_list: list[tuple[float, int]] = []
-        for i in history_pool:
-            v_z = self._zscore(vectors[i], feat_mean, feat_std)
-            d = _euclid(v_now_z, v_z)
-            dist_list.append((d, i))
-        dist_list.sort(key=lambda x: x[0])
-        top_similar = dist_list[:top_k]
-        top_indices = [i for _, i in top_similar]
-        top_dates = [self.aligned[i][0].date for i in top_indices]
-
-        # 5. 每个 horizon 统计未来收益分布
-        horizon_result: dict[int, HorizonForecast] = {}
-        for h in horizons:
-            fc = self._compute_horizon_forecast(top_indices, h, now_idx)
-            if fc is not None:
-                horizon_result[h] = fc
-
-        # 6. 计算特征贡献度：v_now_z 绝对值 → 哪些特征更极端
+        # 5. 计算特征贡献度：v_now_z 绝对值 → 哪些特征更极端
         contrib: dict[str, float] = {}
         for idx, (_, disp) in enumerate(_FEATURES):
             contrib[disp] = round(abs(v_now_z[idx]), 3)
+
+        primary_dates = dates_by_horizon.get(20)
+        if primary_dates is None:
+            primary_dates = next(iter(dates_by_horizon.values()), [])
 
         return MultiHorizonForecast(
             short=horizon_result.get(5),
             medium=horizon_result.get(20),
             long=horizon_result.get(60),
-            top_similar_dates=top_dates[:10],  # 报告里只展示 10 个够用
+            top_similar_dates=primary_dates,
             feature_contribution=contrib,
+            similar_dates_by_horizon=dates_by_horizon,
         )
 
     # -------------------------------------------------------------------
@@ -250,62 +305,234 @@ class HorizonBacktester:
         return [(v[d] - mean[d]) / std[d] if std[d] > 0 else 0.0
                 for d in range(len(v))]
 
-    def _compute_horizon_forecast(self, indices: list[int], h: int,
-                                   now_idx: int) -> Optional[HorizonForecast]:
-        """对相似日集合统计 h 日后的收益分布。"""
-        rets: list[float] = []
-        for i in indices:
-            if i + h >= self.n:
-                continue
-            c0 = self.aligned[i][0].close
-            c1 = self.aligned[i + h][0].close
-            if c0 <= 0:
-                continue
-            rets.append(c1 / c0 - 1)
-        if not rets:
+    def _neighbor_stats(
+        self,
+        vectors: list[Optional[list[float]]],
+        valid_idx: list[int],
+        *,
+        anchor_idx: int,
+        horizon: int,
+        top_k: int,
+        std: list[float],
+    ) -> Optional[_NeighborStats]:
+        """Build a distance-weighted, sample-shrunk forecast at one anchor."""
+        anchor = vectors[anchor_idx]
+        if anchor is None:
+            return None
+        history_pool = [
+            index for index in valid_idx if index <= anchor_idx - horizon
+        ]
+        if len(history_pool) < top_k * 2:
             return None
 
-        pos = [r for r in rets if r > 0]
-        neg = [r for r in rets if r < 0]
-        prob_up = len(pos) / len(rets)
-        exp_ret = sum(rets) / len(rets)
-        avg_pos = sum(pos) / len(pos) if pos else 0.0
-        avg_neg = sum(neg) / len(neg) if neg else 0.0
+        distances = [
+            (_standardized_distance(anchor, vectors[index], std), index)
+            for index in history_pool
+            if vectors[index] is not None
+        ]
+        distances.sort(key=lambda item: item[0])
+        selected = distances[:top_k]
+        if not selected:
+            return None
+        weights = _kernel_weights([distance for distance, _ in selected])
+        total_weight = sum(weights)
+        if total_weight <= 0:
+            return None
 
-        # 汇总相似样本的方向与收益。
-        reason = self._build_reason(h, prob_up, exp_ret, len(rets))
+        weighted_returns: list[tuple[float, float]] = []
+        for weight, (_, index) in zip(weights, selected):
+            start_price = float(self.aligned[index][0].close)
+            future_price = float(self.aligned[index + horizon][0].close)
+            if start_price <= 0:
+                continue
+            weighted_returns.append((future_price / start_price - 1.0, weight))
+        if not weighted_returns:
+            return None
 
-        return HorizonForecast(
-            horizon_days=h,
-            label=self._HORIZON_LABELS.get(h, f"{h}日"),
-            prob_up=round(prob_up, 3),
-            expected_return=round(exp_ret, 4),
-            sample_size=len(rets),
-            avg_positive=round(avg_pos, 4),
-            avg_negative=round(avg_neg, 4),
-            reason=reason,
+        total_weight = sum(weight for _, weight in weighted_returns)
+        raw_probability_up = (
+            sum(weight for value, weight in weighted_returns if value > 0)
+            / total_weight
+        )
+        expected_return = sum(
+            value * weight for value, weight in weighted_returns
+        ) / total_weight
+        positive = [(value, weight) for value, weight in weighted_returns if value > 0]
+        negative = [(value, weight) for value, weight in weighted_returns if value < 0]
+        positive_weight = sum(weight for _, weight in positive)
+        negative_weight = sum(weight for _, weight in negative)
+        average_positive = (
+            sum(value * weight for value, weight in positive)
+            / positive_weight
+            if positive_weight > 0 else 0.0
+        )
+        average_negative = (
+            sum(value * weight for value, weight in negative)
+            / negative_weight
+            if negative_weight > 0 else 0.0
+        )
+        effective_sample_size = (
+            total_weight * total_weight
+            / sum(weight * weight for _, weight in weighted_returns)
+        )
+        mean_distance = sum(distance for distance, _ in selected) / len(selected)
+        pool_median = distances[len(distances) // 2][0]
+        if pool_median <= 1e-12:
+            similarity_quality = 1.0 if mean_distance <= 1e-12 else 0.0
+        else:
+            similarity_quality = max(
+                0.0,
+                min(1.0, 1.0 - mean_distance / pool_median),
+            )
+        sample_confidence = (
+            effective_sample_size / (effective_sample_size + 20.0)
+            * similarity_quality
+        )
+        probability_up = (
+            0.5 + (raw_probability_up - 0.5) * sample_confidence
+        )
+        return _NeighborStats(
+            probability_up=probability_up,
+            raw_probability_up=raw_probability_up,
+            expected_return=expected_return,
+            average_positive=average_positive,
+            average_negative=average_negative,
+            sample_size=len(weighted_returns),
+            effective_sample_size=effective_sample_size,
+            mean_distance=mean_distance,
+            sample_confidence=sample_confidence,
+            indices=tuple(index for _, index in selected),
         )
 
-    @staticmethod
-    def _build_reason(h: int, prob_up: float, exp_ret: float,
-                      n: int) -> str:
-        if prob_up >= 0.6:
+    def _calibrate(
+        self,
+        vectors: list[Optional[list[float]]],
+        valid_idx: list[int],
+        *,
+        horizon: int,
+        top_k: int,
+        now_idx: int,
+        max_samples: int = 80,
+    ) -> _Calibration:
+        """Walk forward over non-overlapping anchors and calculate Brier skill."""
+        anchors: list[int] = []
+        last_anchor: Optional[int] = None
+        for index in reversed(valid_idx):
+            if index + horizon > now_idx:
+                continue
+            if last_anchor is not None and last_anchor - index < horizon:
+                continue
+            if sum(1 for candidate in valid_idx if candidate <= index - horizon) < top_k * 2:
+                continue
+            anchors.append(index)
+            last_anchor = index
+            if len(anchors) >= max_samples:
+                break
+
+        squared_errors: list[float] = []
+        for anchor_idx in reversed(anchors):
+            prefix_valid = [index for index in valid_idx if index <= anchor_idx]
+            _, std = self._compute_feat_stats(vectors, prefix_valid)
+            stats = self._neighbor_stats(
+                vectors,
+                prefix_valid,
+                anchor_idx=anchor_idx,
+                horizon=horizon,
+                top_k=top_k,
+                std=std,
+            )
+            if stats is None:
+                continue
+            actual_up = (
+                float(self.aligned[anchor_idx + horizon][0].close)
+                > float(self.aligned[anchor_idx][0].close)
+            )
+            actual = 1.0 if actual_up else 0.0
+            squared_errors.append((stats.probability_up - actual) ** 2)
+
+        if not squared_errors:
+            return _Calibration()
+        brier_score = sum(squared_errors) / len(squared_errors)
+        # 0.25 is the Brier score of an uninformative 50/50 forecast.
+        skill = max(0.0, min(1.0, 1.0 - brier_score / 0.25))
+        return _Calibration(
+            samples=len(squared_errors),
+            brier_score=brier_score,
+            skill=skill,
+        )
+
+    def _build_horizon_forecast(
+        self,
+        horizon: int,
+        stats: _NeighborStats,
+        calibration: _Calibration,
+        confidence: float,
+    ) -> HorizonForecast:
+        if stats.probability_up >= 0.6:
             tag = "偏多"
-        elif prob_up <= 0.4:
+        elif stats.probability_up <= 0.4:
             tag = "偏空"
         else:
             tag = "方向不明"
-        return (f"{h}日后: 历史 {n} 个相似态中 {prob_up * 100:.1f}% 上涨，"
-                f"平均收益 {exp_ret * 100:+.2f}%，{tag}")
+        calibration_text = (
+            f"Brier={calibration.brier_score:.3f}, skill={calibration.skill:.1%}"
+            if calibration.brier_score is not None
+            else "校准样本不足"
+        )
+        reason = (
+            f"{horizon}日后: {stats.sample_size} 个距离加权样本，"
+            f"原始上涨概率 {stats.raw_probability_up:.1%}，"
+            f"收缩后 {stats.probability_up:.1%}；"
+            f"有效样本 {stats.effective_sample_size:.1f}，"
+            f"{calibration_text}，融合置信度 {confidence:.1%}，{tag}"
+        )
+        return HorizonForecast(
+            horizon_days=horizon,
+            label=self._HORIZON_LABELS.get(horizon, f"{horizon}日"),
+            prob_up=round(stats.probability_up, 4),
+            expected_return=round(stats.expected_return, 4),
+            sample_size=stats.sample_size,
+            avg_positive=round(stats.average_positive, 4),
+            avg_negative=round(stats.average_negative, 4),
+            reason=reason,
+            raw_prob_up=round(stats.raw_probability_up, 4),
+            effective_sample_size=round(stats.effective_sample_size, 2),
+            mean_distance=round(stats.mean_distance, 4),
+            sample_confidence=round(stats.sample_confidence, 4),
+            calibration_samples=calibration.samples,
+            calibration_brier=(
+                round(calibration.brier_score, 6)
+                if calibration.brier_score is not None else None
+            ),
+            calibration_skill=round(calibration.skill, 4),
+            confidence=round(confidence, 4),
+        )
 
 
 # ===========================================================================
 # 纯算数工具
 # ===========================================================================
 
-def _euclid(a: list[float], b: list[float]) -> float:
-    s = 0.0
-    for x, y in zip(a, b):
-        diff = x - y
-        s += diff * diff
-    return math.sqrt(s)
+def _standardized_distance(
+    current: list[float],
+    historical: Optional[list[float]],
+    std: list[float],
+) -> float:
+    if historical is None:
+        return float("inf")
+    return math.sqrt(sum(
+        ((current[index] - historical[index]) / std[index]) ** 2
+        if std[index] > 0 else 0.0
+        for index in range(len(current))
+    ))
+
+
+def _kernel_weights(distances: list[float]) -> list[float]:
+    """Adaptive Gaussian weights; nearer states receive more influence."""
+    if not distances:
+        return []
+    ordered = sorted(distances)
+    scale = ordered[len(ordered) // 2]
+    if scale <= 1e-12:
+        return [1.0 if distance <= 1e-12 else 0.0 for distance in distances]
+    return [math.exp(-0.5 * (distance / scale) ** 2) for distance in distances]

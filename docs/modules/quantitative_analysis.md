@@ -131,10 +131,20 @@ trend
 聚合器只处理 `active=True` 的形态。对每条形态和周期：
 
 1. 从 artifact 读取该形态的 `success_rate` 和 `weight`；
-2. 看多形态的上涨证据为 `success_rate`；
-3. 看空形态的上涨证据为 `1 - success_rate`；
-4. 有效权重为 `weight * max(strength, 0)`；
-5. 对上涨证据做加权平均。
+2. 用 `samples / (samples + 50)` 作为样本可靠性，把命中率向 50% 收缩；
+3. 看多形态的上涨证据为收缩后的命中率；
+4. 看空形态的上涨证据为 `1 - 收缩后的命中率`；
+5. 有效权重为 `weight * max(strength, 0)`；
+6. 对上涨证据做加权平均。
+
+收缩公式为：
+
+```text
+calibrated_rate = 0.5 + (success_rate - 0.5) * samples / (samples + 50)
+```
+
+它避免极小样本的极端命中率对最终概率产生过大影响；原始命中率和样本数仍会在
+报告中分别展示。
 
 没有历史统计或样本数为 0 时，当前先验为：
 
@@ -186,7 +196,12 @@ service = QuantitativeAnalysisService(
 - 特征空间的历史相似态分析；
 - PIT 财报快照；
 - 长期财务趋势和估值；
-- Markdown 报告。
+- Markdown 报告，包括每个触发形态的名义方向、回测有效方向、反向标记、历史
+  命中率、样本数、权重占比和对最终概率的贡献。
+
+stock_advisor 会明确区分形态加权模型与历史相似态模型，并使用可靠性加权凸组合
+生成综合概率。相似态可靠性来自距离质量、有效样本量和逐时点 Brier 校准；若没有
+正的校准技能，则只展示该子模型，不让它影响综合概率。
 
 因此核心量化判断优先调用 analysis service，完整研究报告使用 stock_advisor。
 

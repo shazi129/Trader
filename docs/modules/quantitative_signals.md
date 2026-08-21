@@ -68,6 +68,51 @@ active = [result for result in results if result.active]
 | `price_double_top` | 双顶且跌破颈线 | -1 | 近期事件 |
 | `price_double_bottom` | 双底且突破颈线 | +1 | 近期事件 |
 
+### 复用现有特征的扩展形态
+
+以下形态只读取 `quant_feature_daily` 已有字段，不会增加数据库列或触发 schema
+迁移。加入后内置信号总数为 52。
+
+为兼容现有物化数据，DMI 规则会把库中按 Wilder 平滑和保存的 `adx_14`
+除以 14，再按市场常用的 0～100 ADX 刻度判断 25 门槛；不需要重写历史特征。
+
+| ID | 名称 | 名义方向 | 类型/确认条件 |
+|---|---|---:|---|
+| `price_ma_20_cross_up` | 价格上穿 MA20 | +1 | 当日穿越事件 |
+| `price_ma_20_cross_down` | 价格下穿 MA20 | -1 | 当日穿越事件 |
+| `ma_60_200_golden_cross` | MA60/MA200 金叉 | +1 | 中长期穿越事件 |
+| `ma_60_200_death_cross` | MA60/MA200 死叉 | -1 | 中长期穿越事件 |
+| `dmi_bullish_cross` | DMI 多头交叉 | +1 | +DI 上穿 -DI，且 ADX ≥ 25 |
+| `dmi_bearish_cross` | DMI 空头交叉 | -1 | -DI 上穿 +DI，且 ADX ≥ 25 |
+| `macd_zero_cross_up` | MACD 上穿零轴 | +1 | DIF 当日上穿零轴 |
+| `macd_zero_cross_down` | MACD 下穿零轴 | -1 | DIF 当日下穿零轴 |
+| `macd_hist_bullish_reexpand` | MACD 红柱重新放大 | +1 | 正柱缩短一日后再次增长 |
+| `macd_hist_bearish_reexpand` | MACD 绿柱重新放大 | -1 | 负柱缩短一日后再次增长 |
+| `bollinger_squeeze_breakout_up` | 布林带收口向上突破 | +1 | 前一日带宽处于近 60 个有效值的低 20%，随后突破上轨 |
+| `bollinger_squeeze_breakout_down` | 布林带收口向下突破 | -1 | 前一日带宽处于近 60 个有效值的低 20%，随后跌破下轨 |
+| `bollinger_lower_reentry` | 布林带下轨假跌破回归 | +1 | 前一日轨外、当日重新收回带内 |
+| `bollinger_upper_reentry` | 布林带上轨假突破回归 | -1 | 前一日轨外、当日重新落回带内 |
+| `kdj_oversold_golden_cross` | KDJ 低位金叉 | +1 | 前一日 K < 20，K 当日上穿 D |
+| `kdj_overbought_death_cross` | KDJ 高位死叉 | -1 | 前一日 K > 80，K 当日下穿 D |
+| `rsi_14_oversold_exit` | RSI 离开超卖区 | +1 | RSI 当日向上穿越 30 |
+| `rsi_14_overbought_exit` | RSI 离开超买区 | -1 | RSI 当日向下穿越 70 |
+| `mfi_14_oversold_exit` | MFI 离开超卖区 | +1 | MFI 当日向上穿越 20 |
+| `mfi_14_overbought_exit` | MFI 离开超买区 | -1 | MFI 当日向下穿越 80 |
+| `cci_20_breakout_up` | CCI 上穿 +100 | +1 | 趋势突破事件 |
+| `cci_20_breakout_down` | CCI 下穿 -100 | -1 | 趋势突破事件 |
+| `cci_20_oversold_exit` | CCI 离开超卖区 | +1 | CCI 向上穿越 -100 |
+| `cci_20_overbought_exit` | CCI 离开超买区 | -1 | CCI 向下穿越 +100 |
+| `williams_r_14_oversold_exit` | Williams %R 离开超卖区 | +1 | 向上穿越 -80 |
+| `williams_r_14_overbought_exit` | Williams %R 离开超买区 | -1 | 向下穿越 -20 |
+| `rsi_top_divergence` | RSI 顶背离 | -1 | 近期价格高点抬高、RSI 高点降低 |
+| `rsi_bottom_divergence` | RSI 底背离 | +1 | 近期价格低点降低、RSI 低点抬高 |
+| `mfi_top_divergence` | MFI 顶背离 | -1 | 近期价格高点抬高、MFI 高点降低 |
+| `mfi_bottom_divergence` | MFI 底背离 | +1 | 近期价格低点降低、MFI 低点抬高 |
+| `obv_top_divergence` | OBV 顶背离 | -1 | 近期价格高点抬高、OBV 高点降低 |
+| `obv_bottom_divergence` | OBV 底背离 | +1 | 近期价格低点降低、OBV 低点抬高 |
+| `bearish_price_volume_divergence` | 价涨量缩 | -1 | 5 日动量为正且当日量比低于 0.8 |
+| `bearish_volume_expansion` | 下跌放量 | -1 | 5 日动量为负且当日量比高于 1.2 |
+
 形态的名义方向只是先验解释。最终分析会结合回测成功率；若某个名义看多形态长期
 低于 50% 命中率，聚合器会把它视为经验上的反向证据。
 
@@ -124,9 +169,13 @@ class StrongTrend(SignalRule):
 ## 事件与状态
 
 - 金叉/死叉只在穿越发生当天触发；
+- 离开超买超卖区、零轴穿越、带外回归也只在发生当天触发；
 - 均线排列、超买超卖可以连续多日触发；
 - 背离和双顶双底使用近期约束，避免一个旧形态无限期保持 active；
 - 双顶需要跌破颈线，双底需要突破颈线，不只是两个价格接近的极值。
+
+布林带收口突破至少需要 20 个可比较的历史带宽值。DMI 交叉必须同时通过
+ADX 强度确认，避免把无趋势区间内频繁发生的 DI 交叉全部计入样本。
 
 连续状态会产生相关样本，不能把每一天都理解为独立实验。解释回测结果时需要结合
 市场、标的和样本聚类风险。

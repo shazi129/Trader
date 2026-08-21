@@ -13,7 +13,8 @@
 2. 若特征缺失或落后，仅使用本地 K 线重新物化；K 线为空则失败
 3. 用形态信号和回测统计生成多周期概率
 4. 用 ``HorizonBacktester`` 跑历史相似态匹配，得 5/20/60 日上涨概率
-5. 把上述结果合成一份 markdown，控制台打印 + 落盘到 reports/
+5. 按各自经过样本外校准的可靠性融合两个子模型
+6. 把上述结果合成一份 markdown，控制台打印 + 落盘到 reports/
 """
 
 from __future__ import annotations
@@ -40,7 +41,9 @@ from quantitative.analysis import (  # noqa: E402
     QuantitativeAnalysisService,
     QuantitativeReport,
 )
+from quantitative.analysis.aggregation import signal_contributions  # noqa: E402
 from quantitative.backtesting import (  # noqa: E402
+    BacktestArtifact,
     BacktestArtifactRepository,
     SignalBacktester,
 )
@@ -57,11 +60,13 @@ from utils.logger import get_logger  # noqa: E402
 # 用 try/except 兼容两种入口。
 try:
     from .backtester import HorizonBacktester, MultiHorizonForecast  # noqa: E402
+    from .fusion import FusedForecast, fuse_forecasts  # noqa: E402
     from .fundamental_trend import (  # noqa: E402
         FundamentalTrend, analyze_long_term,
     )
 except ImportError:
     from backtester import HorizonBacktester, MultiHorizonForecast  # type: ignore  # noqa: E402
+    from fusion import FusedForecast, fuse_forecasts  # type: ignore  # noqa: E402
     from fundamental_trend import (  # type: ignore  # noqa: E402
         FundamentalTrend, analyze_long_term,
     )
@@ -133,14 +138,195 @@ def _load_or_build(name_key: str, db_path: Optional[str],
 _HORIZON_ICONS = {True: "[+]", False: "[-]", None: "[ ]"}
 
 
+def _direction_label(prob_up: Optional[float]) -> str:
+    if prob_up is None:
+        return "数据不足"
+    if prob_up >= 0.60:
+        return "偏多"
+    if prob_up <= 0.40:
+        return "偏空"
+    return "中性"
+
+
 def _direction_icon(prob_up: Optional[float]) -> str:
     if prob_up is None:
         return _HORIZON_ICONS[None]
-    if prob_up >= 0.55:
+    if prob_up >= 0.60:
         return _HORIZON_ICONS[True]
-    if prob_up <= 0.45:
+    if prob_up <= 0.40:
         return _HORIZON_ICONS[False]
     return _HORIZON_ICONS[None]
+
+
+def _markdown_cell(value: object) -> str:
+    """Escape text that would otherwise break a Markdown table cell."""
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _render_fused_forecast(forecast: Optional[FusedForecast]) -> list[str]:
+    """Render the reliability-weighted result of both quantitative models."""
+    out = [
+        "### 1.1 综合概率（可靠性加权融合）",
+        "",
+        "> 综合模型使用凸组合：`P综合 = w形态 × P形态 + w相似态 × P相似态`。"
+        "两类模型共享技术指标，因此不采用会假设证据独立的赔率相乘，避免重复信息"
+        "造成过度自信。",
+        "",
+        "> 形态权重来自触发信号的平均回测可靠性；相似态权重同时考虑距离质量、"
+        "有效样本量，以及非重叠历史锚点上的逐时点 Brier 校准。校准无正技能时，"
+        "相似态权重为 0，不进入综合概率。",
+        "",
+    ]
+    if forecast is None or not forecast.horizons:
+        out.extend(["> 缺少可融合的模型结果。", ""])
+        return out
+    out.append(
+        "| 周期 | 综合上涨概率 | 综合下跌概率 | 趋势 | 形态概率 / 权重占比 "
+        "| 相似态概率 / 权重占比 | 模型关系 | 综合置信度 |"
+    )
+    out.append(
+        "|------|--------------|--------------|------|---------------------"
+        "|-------------------------|----------|------------|"
+    )
+    for horizon, item in sorted(forecast.horizons.items()):
+        similarity = (
+            f"{item.similarity_probability_up:.1%} / "
+            f"{item.similarity_weight_share:.1%}"
+            if item.similarity_probability_up is not None
+            else "不可用 / 0.0%"
+        )
+        relationship = "方向相反" if item.models_disagree else "方向一致"
+        out.append(
+            f"| {_direction_icon(item.probability_up)} {horizon}日 "
+            f"| **{item.probability_up:.1%}** "
+            f"| {item.probability_down:.1%} "
+            f"| {item.trend} "
+            f"| {item.signal_probability_up:.1%} / {item.signal_weight_share:.1%} "
+            f"| {similarity} "
+            f"| {relationship} "
+            f"| {item.confidence:.1%} |"
+        )
+    out.append("")
+    return out
+
+
+def _render_directional_signals(
+    report: QuantitativeReport,
+    artifact: Optional[BacktestArtifact],
+) -> list[str]:
+    """Group signals and explain their effective, backtest-weighted direction."""
+    bullish = [signal for signal in report.active_signals if signal.direction > 0]
+    bearish = [signal for signal in report.active_signals if signal.direction < 0]
+    neutral = [signal for signal in report.active_signals if signal.direction == 0]
+
+    out = [
+        f"- 当前触发：**看多 {len(bullish)} 个 / 看空 {len(bearish)} 个"
+        + (f" / 中性 {len(neutral)} 个**" if neutral else "**"),
+        "",
+        "> 此处方向是指标形态本身的名义方向；第 1 节还会结合各形态的"
+        "历史成功率和权重，因此最终概率可能与简单数量对比不同。",
+        "",
+    ]
+
+    def append_group(title: str, signals: list) -> None:
+        out.append(f"### {title}（{len(signals)}）")
+        out.append("")
+        if not signals:
+            out.append("> 当前没有触发。")
+            out.append("")
+            return
+        out.append("| 指标形态 | 分类 | 触发依据 |")
+        out.append("|----------|------|----------|")
+        for signal in signals:
+            out.append(
+                f"| {_markdown_cell(signal.name)} "
+                f"| `{_markdown_cell(signal.category)}` "
+                f"| {_markdown_cell(signal.description or '已触发')} |"
+            )
+        out.append("")
+
+    append_group("3.1 看多指标形态", bullish)
+    append_group("3.2 看空指标形态", bearish)
+    if neutral:
+        append_group("3.3 中性/待确认指标形态", neutral)
+
+    detail_number = "3.4" if neutral else "3.3"
+    out.append(f"### {detail_number} 回测后的有效方向与概率贡献")
+    out.append("")
+    if artifact is None:
+        out.append("> 回测统计不可用，无法解释各形态的实际概率贡献。")
+        out.append("")
+        return out
+
+    universe = "、".join(artifact.universe) if artifact.universe else "未记录"
+    out.extend([
+        "> **形态数量不是投票数。** 历史命中率先按样本量向 50% 收缩；"
+        "看多形态的有效上涨概率等于收缩后命中率，看空形态则等于"
+        "`1 - 收缩后看空命中率`。如果名义形态的命中率低于 50%，"
+        "它会成为反向指标。",
+        "",
+        "> 最终上涨概率 = `Σ(有效上涨概率 × 有效权重) / Σ有效权重`；"
+        "下表的“概率贡献”表示该形态相对 50% 中性基准贡献了多少个百分点，"
+        "所有贡献之和等于该周期上涨概率减去 50%。",
+        "",
+        "> 样本收缩公式：`收缩后命中率 = 50% + (历史命中率 - 50%) × "
+        "样本数 / (样本数 + 50)`，用于防止小样本的极端命中率主导结果。",
+        "",
+        f"> 回测模型：`{artifact.model_version}`；截止日："
+        f"{artifact.data_cutoff or '未记录'}；股票池：{universe}。",
+        "",
+    ])
+
+    for horizon in sorted(report.horizons):
+        contributions = signal_contributions(report.signals, artifact, horizon)
+        out.append(f"#### {horizon}日贡献明细")
+        out.append("")
+        if not contributions:
+            out.append("> 没有带有效权重的触发形态。")
+            out.append("")
+            continue
+        out.append(
+            "| 指标形态 | 名义方向 | 回测有效方向 | 历史命中率 | 样本数 "
+            "| 有效上涨概率 | 模型权重 | 权重占比 | 概率贡献 |"
+        )
+        out.append(
+            "|----------|----------|--------------|------------|--------:"
+            "|--------------:|---------:|---------:|---------:|"
+        )
+        for item in contributions:
+            effective = item.effective_direction_text
+            if item.is_reversed:
+                effective += "（反向）"
+            success = (
+                "默认55.0%*"
+                if item.used_fallback
+                else f"{item.success_rate:.1%}"
+            )
+            out.append(
+                f"| {_markdown_cell(item.name)} "
+                f"| {item.nominal_direction_text} "
+                f"| **{effective}** "
+                f"| {success} "
+                f"| {item.samples} "
+                f"| {item.effective_probability_up:.1%} "
+                f"| {item.backtest_weight:.3f} "
+                f"| {item.weight_share:.1%} "
+                f"| {item.probability_point_contribution * 100:+.2f} 个百分点 |"
+            )
+        out.append("")
+        horizon_result = report.horizons[horizon]
+        out.append(
+            f"> 本周期贡献合计："
+            f"{(horizon_result.probability_up - 0.5) * 100:+.2f} 个百分点，"
+            f"因此上涨概率为 **{horizon_result.probability_up:.1%}**。"
+        )
+        out.append("")
+        if any(item.used_fallback for item in contributions):
+            out.append(
+                "> \\* 无历史样本的形态使用 55% 成功率、0.05 权重的默认值。"
+            )
+            out.append("")
+    return out
 
 
 def _build_markdown(report: QuantitativeReport,
@@ -148,7 +334,9 @@ def _build_markdown(report: QuantitativeReport,
                     name_key: str,
                     backtest_n: Optional[int] = None,
                     fundamental: Optional[FundamentalSnapshot] = None,
-                    fundamental_trend: Optional[FundamentalTrend] = None) -> str:
+                    fundamental_trend: Optional[FundamentalTrend] = None,
+                    signal_artifact: Optional[BacktestArtifact] = None,
+                    fused_forecast: Optional[FusedForecast] = None) -> str:
     """组合 markdown 报告。"""
     lines: list[str] = []
     lines.append(f"# {report.name}({name_key}) 综合分析报告")
@@ -165,9 +353,15 @@ def _build_markdown(report: QuantitativeReport,
                  f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("")
 
-    lines.append("## 1. 指标形态加权预测")
+    lines.append("## 1. 综合预测与指标形态子模型")
+    lines.append("")
+    lines.extend(_render_fused_forecast(fused_forecast))
+
+    lines.append("### 1.2 指标形态子模型")
     lines.append("")
     lines.append("> 只聚合当前实际触发的形态；权重和方向成功率来自无未来函数回测。")
+    lines.append("> 趋势文字与 `[+]`/`[-]` 图标使用统一门槛：上涨概率 ≥60% 为偏多，"
+                 "≤40% 为偏空，其余为中性。")
     lines.append("")
     lines.append("| 周期 | 上涨概率 | 下跌概率 | 趋势 | 有效信号 |")
     lines.append("|------|----------|----------|------|----------|")
@@ -183,28 +377,43 @@ def _build_markdown(report: QuantitativeReport,
     lines.append("## 2. 多周期涨跌预测（历史相似态回测）")
     lines.append("")
     lines.append("> 做法：找出历史上与当前特征向量最相似的 top-K 天，"
-                 "统计这些历史日 N 天后的真实涨跌。"
-                 "**与第 1 节可能相反是正常的** —— "
-                 "比如当前超卖（第 1 节偏空），但历史上每次跌到此位后"
-                 "多数是反弹（第 2 节偏多），这是均值回归。")
+                 "按距离赋予核权重，再统计这些历史日 N 天后的真实涨跌。"
+                 "原始概率会按有效样本量和相似度质量向 50% 收缩，并通过逐时点"
+                 "Brier 校准得到进入第 1.1 节综合概率的可靠性权重。")
     lines.append("")
     if forecast is None:
         lines.append("> 数据不足，无法跑历史相似态回测（至少需要 ~160 个有效交易日）。")
         lines.append("")
     else:
-        lines.append("| 周期 | 上涨概率 | 期望收益 | 上涨样本均值 | 下跌样本均值 | 样本数 |")
-        lines.append("|------|----------|----------|--------------|--------------|--------|")
+        lines.append(
+            "| 周期 | 距离加权原始概率 | 收缩后上涨概率 | 期望收益 "
+            "| 上涨/下跌样本均值 | 有效样本/样本数 | Brier/校准数 "
+            "| 校准技能 | 融合可靠性 |"
+        )
+        lines.append(
+            "|------|------------------|----------------|----------"
+            "|-------------------|-----------------|--------------"
+            "|----------|------------|"
+        )
         for fc in [forecast.short, forecast.medium, forecast.long]:
             if fc is None:
                 continue
             icon = _direction_icon(fc.prob_up)
+            brier = (
+                f"{fc.calibration_brier:.3f}/{fc.calibration_samples}"
+                if fc.calibration_brier is not None else "不可用"
+            )
             lines.append(
                 f"| {icon} {fc.label} "
-                f"| {fc.prob_up * 100:.1f}% "
+                f"| {fc.raw_prob_up:.1%} "
+                f"| **{fc.prob_up:.1%}** "
                 f"| {fc.expected_return * 100:+.2f}% "
-                f"| {fc.avg_positive * 100:+.2f}% "
-                f"| {fc.avg_negative * 100:+.2f}% "
-                f"| {fc.sample_size} |"
+                f"| {fc.avg_positive * 100:+.2f}% / "
+                f"{fc.avg_negative * 100:+.2f}% "
+                f"| {fc.effective_sample_size:.1f}/{fc.sample_size} "
+                f"| {brier} "
+                f"| {fc.calibration_skill:.1%} "
+                f"| {fc.confidence:.1%} |"
             )
         lines.append("")
 
@@ -230,17 +439,45 @@ def _build_markdown(report: QuantitativeReport,
         lines.append("")
 
         if forecast.top_similar_dates:
-            lines.append("### 命中的历史相似日（top 10）")
+            lines.append("### 各周期命中的历史相似日（top 10）")
             lines.append("")
-            lines.append(", ".join(forecast.top_similar_dates))
+            if forecast.similar_dates_by_horizon:
+                for horizon, dates in sorted(
+                    forecast.similar_dates_by_horizon.items()
+                ):
+                    lines.append(f"- **{horizon}日**：{', '.join(dates)}")
+            else:
+                lines.append(", ".join(forecast.top_similar_dates))
             lines.append("")
 
-    lines.append("## 3. 当前触发的指标形态")
+        lines.append("### 两个子模型对照")
+        lines.append("")
+        lines.append(
+            "> 指标形态模型只看当前触发规则及其全股票池回测权重；"
+            "历史相似态模型比较完整特征向量。两者回答的问题不同，"
+            "这里并列展示；它们按校准可靠性进入第 1.1 节的综合概率。"
+        )
+        lines.append("")
+        lines.append("| 周期 | 指标形态模型 | 历史相似态模型 | 概率差 | 关系 |")
+        lines.append("|------|--------------|----------------|--------|------|")
+        for fc in [forecast.short, forecast.medium, forecast.long]:
+            if fc is None or fc.horizon_days not in report.horizons:
+                continue
+            shape_probability = report.horizons[fc.horizon_days].probability_up
+            opposite = (shape_probability - 0.5) * (fc.prob_up - 0.5) < 0
+            relation = "方向相反" if opposite else "方向一致"
+            lines.append(
+                f"| {fc.horizon_days}日 "
+                f"| {shape_probability:.1%}（{_direction_label(shape_probability)}） "
+                f"| {fc.prob_up:.1%}（{_direction_label(fc.prob_up)}） "
+                f"| {(shape_probability - fc.prob_up) * 100:+.1f} 个百分点 "
+                f"| **{relation}** |"
+            )
+        lines.append("")
+
+    lines.append("## 3. 当前触发的指标形态：看多与看空")
     lines.append("")
-    lines.append("```")
-    lines.append(report.summary)
-    lines.append("```")
-    lines.append("")
+    lines.extend(_render_directional_signals(report, signal_artifact))
 
     # ---- 基本面快照（来自最新一份已公告财报）----
     lines.append("## 4. 基本面快照（最新已公告财报）")
@@ -607,8 +844,12 @@ def analyze_stock(name_key: str, *, db_path: Optional[str] = None,
 
     # 2. 统一量化服务：特征 → 形态 → 回测权重 → 多周期概率
     quote_impl = DbQuoteAPI(db_path=db_path)
+    artifact_repository = BacktestArtifactRepository()
     try:
-        service = QuantitativeAnalysisService(quote_impl)
+        service = QuantitativeAnalysisService(
+            quote_impl,
+            artifact_repository=artifact_repository,
+        )
         report = service.analyze_quotes(name_key, quotes)
     finally:
         quote_impl.close()
@@ -619,6 +860,7 @@ def analyze_stock(name_key: str, *, db_path: Optional[str] = None,
     # 3. 多周期相似态回测
     bt = HorizonBacktester(quotes, features)
     forecast = bt.run(top_k=top_k)
+    fused_forecast = fuse_forecasts(report, forecast)
 
     # 4. 基本面快照（最新一份已公告财报；缺数据自动 fallback 到 None）
     #    传 as_of=最新交易日，确保 PIT 合规（不会拿到未公告的数据）。
@@ -649,7 +891,9 @@ def analyze_stock(name_key: str, *, db_path: Optional[str] = None,
     md = _build_markdown(report, forecast, name_key,
                          backtest_n=bt.n,
                          fundamental=fundamental,
-                         fundamental_trend=fundamental_trend)
+                         fundamental_trend=fundamental_trend,
+                         signal_artifact=artifact_repository.load(),
+                         fused_forecast=fused_forecast)
     print("\n" + md + "\n")
 
     if not write_report:

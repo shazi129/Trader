@@ -49,3 +49,41 @@ class VolatilityContraction(SignalRule):
             value=current,
             description=f"HV20={current:.2f}%, 历史分位={percentile:.1%}",
         )
+
+
+class BearishPriceVolumeDivergence(SignalRule):
+    signal_id = "bearish_price_volume_divergence"
+    name = "价涨量缩"
+    category = "volume"
+
+    def evaluate(self, context: SignalContext):
+        ratio = context.latest.get("volume_ratio_20")
+        momentum = context.latest.get("momentum_5")
+        if ratio is None or momentum is None:
+            return self.result(False, 0, description="量价数据不足")
+        active = momentum > 0.0 and ratio < 0.8
+        return self.result(
+            active,
+            -1,
+            value=ratio,
+            description=f"5日上涨{momentum:.2f}%但量比仅{ratio:.2f}",
+        )
+
+
+class BearishVolumeExpansion(SignalRule):
+    signal_id = "bearish_volume_expansion"
+    name = "下跌放量"
+    category = "volume"
+
+    def evaluate(self, context: SignalContext):
+        ratio = context.latest.get("volume_ratio_20")
+        momentum = context.latest.get("momentum_5")
+        if ratio is None or momentum is None:
+            return self.result(False, 0, description="量价数据不足")
+        active = momentum < 0.0 and ratio > 1.2
+        return self.result(
+            active,
+            -1,
+            value=ratio,
+            description=f"5日下跌{momentum:.2f}%且量比={ratio:.2f}",
+        )

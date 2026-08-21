@@ -20,6 +20,65 @@ def _is_recent(index: int, size: int, bars: int = 20) -> bool:
     return index >= size - bars
 
 
+def _indicator_divergence(
+    context: SignalContext,
+    feature_key: str,
+    *,
+    find_high: bool,
+) -> tuple[bool, float] | None:
+    closes = [float(quote.close) for quote in context.quotes]
+    indicator = context.feature_series(feature_key)
+    points = _extrema(closes, 5, find_high)
+    points = [index for index in points if indicator[index] is not None]
+    if len(points) < 2:
+        return None
+    first, second = points[-2:]
+    price_diverges = (
+        closes[second] > closes[first]
+        if find_high
+        else closes[second] < closes[first]
+    )
+    indicator_diverges = (
+        float(indicator[second]) < float(indicator[first])
+        if find_high
+        else float(indicator[second]) > float(indicator[first])
+    )
+    active = (
+        _is_recent(second, len(closes))
+        and price_diverges
+        and indicator_diverges
+    )
+    return active, float(indicator[second]) - float(indicator[first])
+
+
+class _IndicatorDivergence(SignalRule):
+    feature_key = ""
+    indicator_name = ""
+    find_high = False
+
+    def evaluate(self, context: SignalContext):
+        result = _indicator_divergence(
+            context,
+            self.feature_key,
+            find_high=self.find_high,
+        )
+        if result is None:
+            return self.result(False, 0, description="有效价格极值点不足")
+        active, value = result
+        if self.find_high:
+            active_description = f"价格创新高但{self.indicator_name}降低"
+            inactive_description = f"未出现{self.indicator_name}顶背离"
+        else:
+            active_description = f"价格创新低但{self.indicator_name}抬高"
+            inactive_description = f"未出现{self.indicator_name}底背离"
+        return self.result(
+            active,
+            -1 if self.find_high else 1,
+            value=value,
+            description=active_description if active else inactive_description,
+        )
+
+
 class MACDTopDivergence(SignalRule):
     signal_id = "macd_top_divergence"
     name = "MACD顶背离"
@@ -68,6 +127,57 @@ class MACDBottomDivergence(SignalRule):
             active, 1, value=value,
             description="价格创新低但DIF抬高" if active else "未出现底背离",
         )
+
+
+class RSITopDivergence(_IndicatorDivergence):
+    signal_id = "rsi_top_divergence"
+    name = "RSI顶背离"
+    category = "divergence"
+    feature_key = "rsi_14"
+    indicator_name = "RSI"
+    find_high = True
+
+
+class RSIBottomDivergence(_IndicatorDivergence):
+    signal_id = "rsi_bottom_divergence"
+    name = "RSI底背离"
+    category = "divergence"
+    feature_key = "rsi_14"
+    indicator_name = "RSI"
+
+
+class MFITopDivergence(_IndicatorDivergence):
+    signal_id = "mfi_top_divergence"
+    name = "MFI顶背离"
+    category = "divergence"
+    feature_key = "mfi_14"
+    indicator_name = "MFI"
+    find_high = True
+
+
+class MFIBottomDivergence(_IndicatorDivergence):
+    signal_id = "mfi_bottom_divergence"
+    name = "MFI底背离"
+    category = "divergence"
+    feature_key = "mfi_14"
+    indicator_name = "MFI"
+
+
+class OBVTopDivergence(_IndicatorDivergence):
+    signal_id = "obv_top_divergence"
+    name = "OBV顶背离"
+    category = "divergence"
+    feature_key = "obv"
+    indicator_name = "OBV"
+    find_high = True
+
+
+class OBVBottomDivergence(_IndicatorDivergence):
+    signal_id = "obv_bottom_divergence"
+    name = "OBV底背离"
+    category = "divergence"
+    feature_key = "obv"
+    indicator_name = "OBV"
 
 
 class DoubleTop(SignalRule):

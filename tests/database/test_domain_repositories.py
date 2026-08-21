@@ -11,7 +11,7 @@ from quote_api.db_api import DbQuoteAPI
 from quote_api.quote_base import DailyQuote
 from quote_api.repository import MarketDataRepository
 from quantitative.analysis import QuantitativeAnalysisService
-from quantitative.analysis.aggregation import aggregate_signals
+from quantitative.analysis.aggregation import aggregate_signals, signal_contributions
 from quantitative.backtesting import BacktestArtifactRepository, SignalBacktester
 from quantitative.backtesting.models import BacktestArtifact, SignalMetric
 from quantitative.features import FeatureCalculator, FeatureRepository
@@ -119,11 +119,32 @@ def test_aggregation_ignores_inactive_signals_and_respects_direction():
     inactive = SignalResult("inactive", "inactive", "x", False, 0)
     bullish = SignalResult("bull", "bull", "x", True, 1)
     result = aggregate_signals([inactive, bullish], artifact, horizons=(20,))[20]
-    assert result.probability_up == 0.7
+    assert result.probability_up == 0.6333
 
     bearish = SignalResult("bear", "bear", "x", True, -1)
     result = aggregate_signals([bearish], artifact, horizons=(20,))[20]
-    assert result.probability_up == 0.3
+    assert result.probability_up == 0.3667
+
+
+def test_signal_contributions_explain_reversed_historical_direction():
+    artifact = BacktestArtifact(metrics={
+        "bull": {"20": SignalMetric(100, 70, 0.7, 0.4)},
+        "bear": {"20": SignalMetric(100, 40, 0.4, 0.6)},
+    })
+    bullish = SignalResult("bull", "bull", "test", True, 1)
+    bearish = SignalResult("bear", "bear", "test", True, -1)
+
+    contributions = signal_contributions([bullish, bearish], artifact, 20)
+
+    assert contributions[0].effective_probability_up == pytest.approx(0.633333)
+    assert contributions[0].weight_share == pytest.approx(0.4)
+    assert not contributions[0].is_reversed
+    assert contributions[1].effective_probability_up == pytest.approx(0.566667)
+    assert contributions[1].weight_share == pytest.approx(0.6)
+    assert contributions[1].is_reversed
+    assert sum(
+        item.probability_point_contribution for item in contributions
+    ) == pytest.approx(0.0933333333)
 
 
 def test_signal_backtest_produces_sample_aware_statistics():

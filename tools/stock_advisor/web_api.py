@@ -16,9 +16,9 @@
     - 逐日多空强度（bullish_strength ∈ [-1, 1]，正=偏多，负=偏空）
 
 ``report`` 返回指定交易日（默认最新）的综合分析报告 Markdown 文本。
-多空强度的算法与 ``stock_advisor.analyze_stock`` 完全一致（同一个
-特征、形态与回测权重模型），只是把
-"最新一天"扩展成"截至每个交易日"的逐点快照。
+``trend`` 的多空强度使用形态与回测权重子模型，把“最新一天”扩展成
+“截至每个交易日”的逐点快照；``report`` 还会计算历史相似态，并按经过
+走步校准的可靠性与形态子模型融合。
 
 注意：本脚本不回源拉取数据。``report`` 在特征缺失时可基于本地 K 线物化特征；
 若 DB 中缺少该股票 K 线，则返回空结果（前端应提示先运行 kline_fetcher）。
@@ -60,6 +60,7 @@ try:
         _load_or_build,
     )
     from .backtester import HorizonBacktester  # noqa: E402
+    from .fusion import fuse_forecasts  # noqa: E402
     from .fundamental_trend import analyze_long_term  # noqa: E402
 except ImportError:  # 直接运行 web_api.py 时（非 -m）
     from stock_advisor import (  # type: ignore  # noqa: E402
@@ -67,6 +68,7 @@ except ImportError:  # 直接运行 web_api.py 时（非 -m）
         _load_or_build,
     )
     from backtester import HorizonBacktester  # type: ignore  # noqa: E402
+    from fusion import fuse_forecasts  # type: ignore  # noqa: E402
     from fundamental_trend import analyze_long_term  # type: ignore  # noqa: E402
 
 
@@ -194,8 +196,12 @@ def _cmd_report(name_key: str, date: Optional[str], db_path: Optional[str]) -> d
         features = [snapshot for snapshot in features if snapshot.date <= cutoff]
 
     quote_impl = DbQuoteAPI(db_path=db_path)
+    artifact_repository = BacktestArtifactRepository()
     try:
-        service = QuantitativeAnalysisService(quote_impl)
+        service = QuantitativeAnalysisService(
+            quote_impl,
+            artifact_repository=artifact_repository,
+        )
         report = service.analyze_quotes(name_key, quotes)
     finally:
         quote_impl.close()
@@ -228,10 +234,13 @@ def _cmd_report(name_key: str, date: Optional[str], db_path: Optional[str]) -> d
         fundamental = None
         fundamental_trend = None
 
+    fused_forecast = fuse_forecasts(report, forecast)
     md = _build_markdown(report, forecast, name_key,
                          backtest_n=None,
                          fundamental=fundamental,
-                         fundamental_trend=fundamental_trend)
+                         fundamental_trend=fundamental_trend,
+                         signal_artifact=artifact_repository.load(),
+                         fused_forecast=fused_forecast)
     return {
         "ok": True,
         "name_key": name_key,
