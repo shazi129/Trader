@@ -2,10 +2,9 @@
 """流动性 / 资金面（B 类：从行情派生）指标。
 
 所有函数均为 **纯函数**（序列输入 → 同长度序列输出），与
-`indicators.volume` 同风格；前置不足窗口的位置写 0.0，保持与
-现有因子对 NaN/0 的处理一致。
+`indicators.volume` 同风格；前置不足窗口的位置写 0.0。
 
-字段含义与 `quantitative.fields.liquidity.LiquidityFields` 一一对应。
+输出由 ``quantitative.features.FeatureCalculator`` 统一命名并物化。
 """
 
 from __future__ import annotations

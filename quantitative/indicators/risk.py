@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """风险/波动类指标。
 
-这些函数面向"单点取值"场景（quant_analyzer 的因子）也面向"序列计算"
-场景（factor_batch 的批量回填），分别提供 `_point` 和 `_series` 两类
-入口。Series 函数返回与 closes 同长度的列表，前置不足窗口的位置写 0.0。
+同时提供单点与序列计算入口。Series 函数返回与 closes 同长度的列表，
+前置不足窗口的位置写 0.0。
 """
 
 from __future__ import annotations
@@ -13,7 +12,7 @@ from typing import Sequence
 
 
 # ===========================================================================
-# 单点：用于 QuantFactorEngine
+# 单点计算接口
 # ===========================================================================
 
 def historical_volatility_point(closes: Sequence[float], period: int = 20,
@@ -223,7 +222,7 @@ def downside_volatility_point(closes: Sequence[float], period: int = 20,
 
 
 # ===========================================================================
-# 序列：用于 FactorSeriesEngine 批量回填
+# 序列计算接口：由 FeatureCalculator 物化
 # ===========================================================================
 
 def historical_volatility_series(closes: Sequence[float], period: int,
@@ -244,7 +243,7 @@ def historical_volatility_series(closes: Sequence[float], period: int,
             rets.append(math.log(closes[j] / closes[j - 1]))
         if not ok or not rets:
             continue
-        # 与原 factor_batch 实现保持一致：按 (n-1) 分母
+        # 样本标准差使用 (n-1) 分母。
         denom = period - 1 if period > 1 else 1
         std = (sum(r ** 2 for r in rets) / denom) ** 0.5
         out[i] = std * (annualize ** 0.5) * 100
@@ -272,7 +271,6 @@ def rolling_sharpe_sortino_calmar(closes: Sequence[float],
                                   annualize: int = 252):
     """滚动夏普 / 索提诺 / 卡玛；返回 (sharpe, sortino, calmar) 三个等长 list。
 
-    与原 factor_batch.compute_risk_factors 行为对齐：
     - 需要 (period+1) 根 K 线起算；
     - sharpe 用 std (period-1) 分母，sortino 用 downsides 总数取均方再开方；
     - calmar = (close_t / close_{t-period} - 1) * 100 / max_drawdown[t]。

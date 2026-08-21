@@ -17,11 +17,11 @@
 
 ``report`` 返回指定交易日（默认最新）的综合分析报告 Markdown 文本。
 多空强度的算法与 ``stock_advisor.analyze_stock`` 完全一致（同一个
-``QuantFactorEngine.compute_all`` + ``compute_probability``），只是把
+特征、形态与回测权重模型），只是把
 "最新一天"扩展成"截至每个交易日"的逐点快照。
 
-注意：本脚本只读数据库，不触发因子重算 / 不回源拉取数据。若 DB 中缺少
-该股票数据，返回空结果（前端应提示先在 Trader 里跑一次 factor_batch）。
+注意：本脚本只读数据库，不触发特征物化 / 不回源拉取数据。若 DB 中缺少
+该股票数据，返回空结果（前端应提示先物化量化特征）。
 """
 
 from __future__ import annotations
@@ -42,12 +42,15 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import config  # noqa: E402
-from database.stock_db_utils import StockDB  # noqa: E402
-from quantitative.analyzer import (  # noqa: E402
-    QuantFactorEngine,
-    compute_probability,
-    compute_period_probabilities,
-)
+from financial_reports.repository import FinancialReportRepository  # noqa: E402
+from financial_reports.analysis import build_snapshot  # noqa: E402
+from quote_api import QuoteAPIFactory  # noqa: E402
+from quote_api.repository import MarketDataRepository  # noqa: E402
+from quantitative.analysis import QuantitativeAnalysisService  # noqa: E402
+from quantitative.analysis.aggregation import aggregate_signals  # noqa: E402
+from quantitative.backtesting import BacktestArtifactRepository  # noqa: E402
+from quantitative.features import FeatureCalculator  # noqa: E402
+from quantitative.signals import SignalContext, SignalEngine  # noqa: E402
 from quote_api.quote_base import DailyQuote  # noqa: E402
 
 # 复用 stock_advisor 的 markdown 渲染（报告生成用）
@@ -55,19 +58,15 @@ try:
     from .stock_advisor import (  # noqa: E402
         _build_markdown,
         _load_or_build,
-        AnalysisReport,
     )
     from .backtester import HorizonBacktester  # noqa: E402
-    from .fundamental_view import build_snapshot  # noqa: E402
     from .fundamental_trend import analyze_long_term  # noqa: E402
 except ImportError:  # 直接运行 web_api.py 时（非 -m）
     from stock_advisor import (  # type: ignore  # noqa: E402
         _build_markdown,
         _load_or_build,
-        AnalysisReport,
     )
     from backtester import HorizonBacktester  # type: ignore  # noqa: E402
-    from fundamental_view import build_snapshot  # type: ignore  # noqa: E402
     from fundamental_trend import analyze_long_term  # type: ignore  # noqa: E402
 
 
@@ -79,40 +78,48 @@ def _compute_daily_strength(quotes: list[DailyQuote], days: int
                             ) -> list[dict]:
     """对最近 ``days`` 个交易日，逐日计算多空强度。
 
-    做法：对每个交易日 i，用 ``quotes[:i+1]`` 的历史切片构造单点因子引擎，
-    复用 ``QuantFactorEngine.compute_all()`` + ``compute_probability()``，
+    做法：对每个交易日 i，用 ``quotes[:i+1]`` 的历史切片构造信号上下文，
+    复用统一特征、形态与回测权重模型，
     得到该日 prob_up ∈ [0.15, 0.85]。再映射成有符号强度：
 
         strength = (prob_up - 0.5) / 0.35  →  [-1, 1]
 
-    该映射是 ``compute_probability`` 内部 ``prob_up = 0.5 + normalized*0.35``
-    的逆运算，因此 ``strength == normalized``（因子加权信号），
+    将 20 日上涨概率中心化为强度，
     正值 = 偏多（红柱向上），负值 = 偏空（绿柱向下）。
 
-    只计算最后 ``days`` 根 K 线；更早的历史仅用于喂因子窗口。
+    只计算最后 ``days`` 根 K 线；更早的历史仅用于满足特征窗口。
     """
     n = len(quotes)
     if n == 0:
         return []
 
+    calculator = FeatureCalculator()
+    features = calculator.compute("series", quotes)
+    engine = SignalEngine()
+    artifact = BacktestArtifactRepository().load()
     start = max(0, n - days)
     out: list[dict] = []
     for i in range(start, n):
         q = quotes[i]
         window = quotes[: i + 1]
         try:
-            engine = QuantFactorEngine(window, fundamentals=None)
-            factors = engine.compute_all()
-            prob_up, prob_down, trend = compute_probability(factors)
+            feature_window = features[:i + 1]
+            context = SignalContext("series", window, feature_window)
+            signals = engine.evaluate(context)
+            horizons = aggregate_signals(signals, artifact)
+            primary = horizons[20]
+            prob_up = primary.probability_up
+            prob_down = primary.probability_down
+            trend = primary.trend
             strength = (prob_up - 0.5) / 0.35
             strength = max(-1.0, min(1.0, strength))
-            period_probs = compute_period_probabilities(factors)
             period_net = {
-                k: round(period_probs[k]["net_strength"], 4)
-                for k in ("short", "medium", "long")
+                "short": round(horizons[5].probability_up * 2 - 1, 4),
+                "medium": round(horizons[20].probability_up * 2 - 1, 4),
+                "long": round(horizons[60].probability_up * 2 - 1, 4),
             }
         except Exception:  # noqa: BLE001
-            # 早期窗口因子不足等异常，强度记为 0（中性）
+            # 早期窗口特征不足等异常，强度记为 0（中性）
             prob_up, prob_down, trend = 0.5, 0.5, "数据不足"
             strength = 0.0
             period_net = {"short": 0.0, "medium": 0.0, "long": 0.0}
@@ -140,13 +147,13 @@ def _cmd_trend(name_key: str, days: int, db_path: Optional[str]) -> dict:
     if stock_info is None:
         return {"ok": False, "error": f"未登记股票: {name_key}"}
 
-    with closing(StockDB(db_path)) as db:
-        quotes = db.get_klines_in_range(name_key)
+    with closing(MarketDataRepository(db_path)) as repository:
+        quotes = repository.get_range(name_key)
 
     if not quotes:
         return {
             "ok": False,
-            "error": f"数据库无 {name_key} 的 K 线数据，请先在 Trader 中运行 factor_batch",
+            "error": f"数据库无 {name_key} 的 K 线数据，请先运行 kline_fetcher",
         }
 
     series = _compute_daily_strength(quotes, days)
@@ -169,14 +176,14 @@ def _cmd_report(name_key: str, date: Optional[str], db_path: Optional[str],
 
     复用 stock_advisor 的 ``_load_or_build`` + 评分 + ``_build_markdown``。
     当指定 ``--date`` 时，把数据截断到该交易日，再生成"截至该日"的报告
-    （因子 / 回测 / 基本面都以该日为最新，符合 point-in-time）。
+    （特征 / 信号 / 回测 / 基本面都以该日为最新，符合 point-in-time）。
     """
     stock_info = config.global_stock_list.get(name_key)
     if stock_info is None:
         return {"ok": False, "error": f"未登记股票: {name_key}"}
 
     api = api or "futu"
-    quotes, indicators = _load_or_build(name_key, api, db_path, force_refresh=False)
+    quotes, features = _load_or_build(name_key, api, db_path, force_refresh=False)
     if not quotes:
         return {"ok": False, "error": f"无法获取 {name_key} 行情数据"}
 
@@ -186,39 +193,26 @@ def _cmd_report(name_key: str, date: Optional[str], db_path: Optional[str],
         quotes = [q for q in quotes if q.date <= cutoff]
         if not quotes:
             return {"ok": False, "error": f"{cutoff} 之前无有效行情"}
-        indicators = [ind for ind in indicators if ind.date <= cutoff]
+        features = [snapshot for snapshot in features if snapshot.date <= cutoff]
 
-    # 评分
-    engine = QuantFactorEngine(quotes, fundamentals=None)
-    factors = engine.compute_all()
-    prob_up, prob_down, trend = compute_probability(factors)
-    report = AnalysisReport(
-        stock_name=stock_info.name,
-        name_key=name_key,
-        data_source=api,
-        data_days=len(quotes),
-        latest_price=quotes[-1].close,
-        factors=factors,
-        bullish_score=round(prob_up * 100, 1),
-        bearish_score=round(prob_down * 100, 1),
-        trend=trend,
-        probability_up=prob_up,
-        probability_down=prob_down,
-    )
+    service = QuantitativeAnalysisService(QuoteAPIFactory.create(api))
+    report = service.analyze_quotes(name_key, quotes)
+    if report is None:
+        return {"ok": False, "error": f"无法分析 {name_key}"}
 
     # 回测 + 基本面（异常兜底，不阻断主流程）
     forecast = None
     fundamental = None
     fundamental_trend = None
     try:
-        bt = HorizonBacktester(quotes, indicators)
+        bt = HorizonBacktester(quotes, features)
         forecast = bt.run(top_k=50)
     except Exception:  # noqa: BLE001
         forecast = None
     try:
-        with closing(StockDB(db_path)) as db:
-            fundamental = build_snapshot(name_key, db, as_of=quotes[-1].date)
-            rows = db.get_financial_reports(name_key)
+        with closing(FinancialReportRepository(db_path)) as repository:
+            fundamental = build_snapshot(name_key, repository, as_of=quotes[-1].date)
+            rows = repository.get_reports(name_key)
             rows_pit = [r for r in rows
                         if r.get("AnnounceDate") and r["AnnounceDate"] <= quotes[-1].date]
             if rows_pit:

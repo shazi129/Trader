@@ -7,7 +7,7 @@
 设计原则：
 - **库代码不主动配置根 logger**：本模块仅在第一次被导入时给项目根
   logger ``trader`` 装一个 StreamHandler（仅当未配置过），日志级别
-  默认 INFO。CLI 入口（如 ``factor_batch.main``、``quant_analyzer.main``）
+  默认 INFO。CLI 入口（如 ``quantitative.cli.main``）
   可调用 ``configure_root_level`` 显式调整。
 - 调用方统一用 ``get_logger(__name__)``，输出会在 ``[模块] 信息`` 形式下
   显示，方便定位。

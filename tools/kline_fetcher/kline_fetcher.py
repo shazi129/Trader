@@ -15,8 +15,8 @@
    - 调用 ``CachedQuoteAPI.get_klines(name, start_date, end_date)`` 抓数据：
      缓存层会自动按 ~600 交易日窗口分批向上游请求，并在内部 UPSERT 入库，
      fetcher 不需要自己控制 limit 或处理写库；
-   - **写库成功后**自动调 ``compute_and_save_factors`` 同步刷新因子表，
-     保证 ``factor_indicator`` 与 ``kline_daily`` 的最新日期一致；因子计算
+   - **写库成功后**自动物化 ``quant_feature_daily``，
+     保证特征快照与 ``kline_daily`` 的最新日期一致；特征计算
      失败不影响 K 线拉取结果。
 3. 单只股票失败不影响其它股票，整体输出统计。
 
@@ -39,7 +39,7 @@
 --------
 - 不依赖 ``schedule`` / ``APScheduler`` 等三方包：用最朴素的"算下一次时间 → sleep
   → 跑"循环，零依赖、Windows/Linux 都能跑。
-- DB / API 都走项目已有抽象（``StockDB`` + ``QuoteAPIFactory``），不重复造轮子。
+- 行情存储走 ``MarketDataRepository``，特征存储归量化域所有。
 - 股票列表不再手动维护，直接读取 ``STOCK_META`` 全量，新增股票只需在
   ``quote_api/stock_meta.py`` 加一行。
 """
@@ -63,8 +63,8 @@ _ROOT = _THIS_DIR.parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from database.stock_db_utils import StockDB  # noqa: E402
-from quantitative.factor_batch import compute_and_save_factors  # noqa: E402
+from quote_api.repository import MarketDataRepository  # noqa: E402
+from quantitative.features import FeatureRepository, materialize_symbol  # noqa: E402
 from quote_api import QuoteAPIFactory  # noqa: E402
 from quote_api.stock_meta import StockMarket, all_keys, get_meta  # noqa: E402
 from utils.logger import get_logger  # noqa: E402
@@ -200,13 +200,14 @@ def _resolve_end_date(name_key: str, today: datetime.date) -> str:
     return end.strftime("%Y-%m-%d")
 
 
-def _resolve_start_date(db: StockDB, name_key: str) -> Optional[str]:
+def _resolve_start_date(repository: MarketDataRepository,
+                        name_key: str) -> Optional[str]:
     """决定起始拉取日期。
 
     优先级：DB 最新日期 +1 > StockInfo.listing_date。
     全部为空时返回 None，让上游 / 缓存层按其默认起点处理。
     """
-    latest = db.get_latest_date(name_key)
+    latest = repository.latest_date(name_key)
     if latest:
         return _next_day(latest)
 
@@ -217,13 +218,13 @@ def _resolve_start_date(db: StockDB, name_key: str) -> Optional[str]:
     return None
 
 
-def fetch_one(api, db: StockDB, name_key: str, cfg: FetcherConfig,
+def fetch_one(api, repository: MarketDataRepository, name_key: str, cfg: FetcherConfig,
               today: datetime.date) -> tuple[bool, int, str]:
     """拉取并入库单只股票。
 
     :return: (是否成功, 新增条数, 起始日期)
     """
-    start = _resolve_start_date(db, name_key)
+    start = _resolve_start_date(repository, name_key)
     end = _resolve_end_date(name_key, today)
 
     if start and start > end:
@@ -249,23 +250,16 @@ def fetch_one(api, db: StockDB, name_key: str, cfg: FetcherConfig,
     _log.info("[%s] 当前区间共 %d 条 (%s ~ %s)",
               name_key, len(quotes), quotes[0].date, quotes[-1].date)
 
-    # K 线已写库 → 同步刷新因子表，保证 kline_daily 和 factor_indicator
-    # 的最新日期一致（stock_advisor._load_or_build 用这个判等来决定是否重算）。
-    # 失败不影响本次 K 线拉取结果：因子下次跑分析时还会被 _load_or_build 兜底重算。
+    # K 线已写入行情仓储 → 同步物化特征，保证两个领域视图的最新日期一致。
+    # 失败不影响本次 K 线拉取；stock_advisor 下次分析时还会兜底物化。
     try:
-        ok_fac = compute_and_save_factors(
-            name_key,
-            api_name=cfg.api_name,
-            db_path=None,
-            limit=None,  # 不再限制条数，让因子用全量数据
-            force_refresh=False,
-        )
-        if ok_fac:
-            _log.info("[%s] 因子表已同步", name_key)
+        feature_count = materialize_symbol(name_key, source="db")
+        if feature_count:
+            _log.info("[%s] 特征快照已同步（%d条）", name_key, feature_count)
         else:
-            _log.warning("[%s] 因子计算返回失败，跳过", name_key)
+            _log.warning("[%s] 特征计算返回空结果，跳过", name_key)
     except Exception as e:
-        _log.error("[%s] 因子计算异常（不影响 K 线入库结果）: %s",
+        _log.error("[%s] 特征物化异常（不影响 K 线入库结果）: %s",
                    name_key, e)
 
     return True, len(quotes), start or ""
@@ -297,7 +291,7 @@ def run_once(config_path: Path = DEFAULT_CONFIG_PATH) -> int:
     fail_cnt = 0
     total_rows = 0
 
-    with closing(StockDB()) as db:
+    with closing(MarketDataRepository()) as db:
         for name_key in names:
             ok, rows, _ = fetch_one(api, db, name_key, cfg, today)
             if ok:
@@ -381,7 +375,7 @@ def run_fill(symbol: str, config_path: Path = DEFAULT_CONFIG_PATH) -> int:
     _log.info("=" * 60)
 
     api = QuoteAPIFactory.create_with_cache(cfg.api_name)
-    with closing(StockDB()) as db:
+    with closing(MarketDataRepository()) as db:
         ok, rows, start = fetch_one(api, db, symbol, cfg, today)
         if not ok:
             _log.error("[%s] 补全失败", symbol)
@@ -400,7 +394,7 @@ def run_recent(symbol: str, days: int, config_path: Path = DEFAULT_CONFIG_PATH) 
     _log.info("=" * 60)
 
     api = QuoteAPIFactory.create_with_cache(cfg.api_name)
-    with closing(StockDB()) as db:
+    with closing(MarketDataRepository()) as db:
         # 最近 N 天：end_date 按正常收盘逻辑，start_date 从 end 往前推 days 天
         end = _resolve_end_date(symbol, today)
         start_d = datetime.datetime.strptime(end, "%Y-%m-%d").date()
@@ -420,15 +414,12 @@ def run_recent(symbol: str, days: int, config_path: Path = DEFAULT_CONFIG_PATH) 
         _log.info("[%s] 拉取完成: %d 条 (%s ~ %s)",
                   symbol, len(quotes), quotes[0].date, quotes[-1].date)
 
-        # 同步因子
+        # 同步物化量化特征
         try:
-            compute_and_save_factors(
-                symbol, api_name=cfg.api_name, db_path=None,
-                limit=None, force_refresh=False,
-            )
-            _log.info("[%s] 因子表已同步", symbol)
+            feature_count = materialize_symbol(symbol, source="db")
+            _log.info("[%s] 特征快照已同步（%d条）", symbol, feature_count)
         except Exception as e:
-            _log.warning("[%s] 因子计算异常: %s", symbol, e)
+            _log.warning("[%s] 特征物化异常: %s", symbol, e)
     return 0
 
 
@@ -438,8 +429,10 @@ def run_delete(symbol: str, config_path: Path = DEFAULT_CONFIG_PATH) -> int:
     _log.info("删除 [%s] 的全部 K 线", symbol)
     _log.info("=" * 60)
 
-    with closing(StockDB()) as db:
-        deleted = db.delete_by_symbol(symbol)
+    with closing(MarketDataRepository()) as repository:
+        deleted = repository.delete_symbol(symbol)
+    with closing(FeatureRepository()) as feature_repository:
+        feature_repository.delete_symbol(symbol)
         if deleted == 0:
             _log.info("[%s] 没有 K 线记录，无需删除", symbol)
         else:

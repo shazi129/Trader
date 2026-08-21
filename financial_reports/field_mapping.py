@@ -4,22 +4,20 @@
 设计原则
 ========
 
-1. **统一字段名**就是 ``financial_report`` 表的列名 / ``FundamentalFields``
-   dataclass 的属性名（首字母大写驼峰，与 DB 列名一致）。
+1. **统一字段名**就是 ``financial_report`` 表的财务数据列名（首字母大写驼峰）。
 2. 每个市场（A 股 CAS / 港股 IFRS / 美股 GAAP）维护独立 dict；港股因繁简
    并存，两版都收录（实测腾讯 2024Q4 突然切到简体）。
 3. 同义词显式列出，例如 A 股 "总资产" / "资产总计" 对应同一统一字段
    ``TotalAssets``。
-4. **新增市场只需加一份 dict + 一个 parser**，DB 层和因子层零修改。
+4. **新增市场只需加一份 dict + 一个 parser**，仓储与分析服务无需修改。
 
 加新字段流程
 ============
 
 1. 在 ``UNIFIED_FIELDS`` 集合里加上统一名；
-2. 在 ``database/stock_db_utils.py._financial_columns`` 里加列；
-3. 在对应市场的 mapping dict 里加 "原始科目名": "统一名" 一行；
-4. 重跑 ``financial_fetcher.py``（``_ensure_schema`` 会自动 ALTER TABLE
-   补缺列）。
+2. 在对应市场的 mapping dict 里加 "原始科目名": "统一名" 一行；
+3. 重跑 ``financial_fetcher.py``；``FinancialReportRepository`` 会按
+   ``UNIFIED_FIELDS`` 自动补齐数据库列。
 """
 
 from __future__ import annotations

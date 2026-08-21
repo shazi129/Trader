@@ -17,8 +17,7 @@ def rsi(closes: Sequence[float], period: int = 14,
 
     :param mode:
         - ``"wilder"`` (默认)：标准 Wilder 递推平滑（教科书定义，更准确）。
-        - ``"simple"``：每根 bar 用窗口内简单平均（旧版 ``factor_batch._compute_rsi``
-          的算法，存在历史入库数据时建议沿用以保证数值平滑）。
+        - ``"simple"``：每根 bar 用窗口内简单平均。
 
     返回长度为 ``len(closes)`` 的列表，前 ``period`` 个位置为 NaN。
     """
@@ -101,7 +100,7 @@ def momentum_pct(closes: Sequence[float], period: int) -> list[float]:
     return out
 
 
-# ROC 与 momentum_pct 同义（在原项目里都是 (C/C[-N]-1)*100）
+# ROC 与 momentum_pct 同义。
 roc = momentum_pct
 
 
@@ -111,7 +110,7 @@ def cci(highs: Sequence[float], lows: Sequence[float],
         closes: Sequence[float], period: int = 20) -> list[float]:
     n = len(closes)
     tp = [(highs[i] + lows[i] + closes[i]) / 3 for i in range(n)]
-    out = [0.0] * n  # 注意：原 factor_batch 里不足窗口写 0；保持一致
+    out = [0.0] * n
     for i in range(period - 1, n):
         window = tp[i - period + 1:i + 1]
         ma_tp = sum(window) / period

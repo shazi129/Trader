@@ -16,15 +16,15 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from database.stock_db_utils import StockDB  # noqa: E402
 from quote_api import QuoteAPIFactory  # noqa: E402
 from quote_api.cached_api import CachedQuoteAPI  # noqa: E402
+from quote_api.repository import MarketDataRepository  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
 
 def _use_temporary_db(api: CachedQuoteAPI, tmp_path: Path) -> CachedQuoteAPI:
-    api._db = StockDB(str(tmp_path / "cached_quote.db"))
+    api._repository = MarketDataRepository(str(tmp_path / "cached_quote.db"))
     return api
 
 

@@ -5,14 +5,14 @@ from __future__ import annotations
 
 from typing import List
 
-from database.stock_db_utils import StockDB
+from quote_api.repository import MarketDataRepository
 from utils.data_types import DataValue
 
 
 def get_ratio_data(denominator_key: str, numerator_key: str) -> List[DataValue]:
     """返回 denominator.Close / numerator.Close 的时间序列（升序）。"""
-    db = StockDB()
+    repository = MarketDataRepository()
     try:
-        return db.get_stock_ratio_data(denominator_key, numerator_key)
+        return repository.ratio_series(denominator_key, numerator_key)
     finally:
-        db.close()
+        repository.close()

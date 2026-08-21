@@ -8,9 +8,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import List, Optional
 
 from quote_api.quote_base import DailyQuote, QuoteAPI
+from quote_api.repository import MarketDataRepository
 
 
 class DbQuoteAPI(QuoteAPI):
@@ -18,16 +20,24 @@ class DbQuoteAPI(QuoteAPI):
 
     SOURCE = "db"
 
-    def __init__(self, adjustment="none") -> None:
+    def __init__(
+        self,
+        adjustment="none",
+        *,
+        repository: MarketDataRepository | None = None,
+        db_path: str | Path | None = None,
+    ) -> None:
         super().__init__(adjustment=adjustment)
-        self._db = None
+        self._repository = repository
+        self._db_path = db_path
+        self._owns_repository = repository is None
 
     # ------------------------------------------------------------------
-    def _get_db(self):
-        if self._db is None:
-            from database.stock_db_utils import StockDB
-            self._db = StockDB()
-        return self._db
+    def _get_repository(self):
+        if self._repository is None:
+            self._repository = MarketDataRepository(self._db_path)
+            self._owns_repository = True
+        return self._repository
 
     # ------------------------------------------------------------------
     def get_klines(
@@ -39,8 +49,8 @@ class DbQuoteAPI(QuoteAPI):
     ) -> List[DailyQuote]:
         sd = self.normalize_date(start_date)
         ed = self.normalize_date(end_date)
-        db = self._get_db()
-        rows = db.get_klines_in_range(name, sd, ed)
+        repository = self._get_repository()
+        rows = repository.get_range(name, sd, ed)
         # 补全来源标识
         for q in rows:
             q.source = self.SOURCE
@@ -52,24 +62,25 @@ class DbQuoteAPI(QuoteAPI):
     # ------------------------------------------------------------------
     def get_daily_quote(self, name: str, date=None) -> Optional[DailyQuote]:
         target = self.normalize_date(date)
-        db = self._get_db()
+        repository = self._get_repository()
         if target is None:
-            rows = db.get_klines_in_range(name, None, None)
+            rows = repository.get_range(name, None, None)
             if not rows:
                 return None
             q = rows[-1]
             q.source = self.SOURCE
             return q
-        q = db.get_daily_quote_by_date(name, target)
+        q = repository.get_by_date(name, target)
         if q is not None:
             q.source = self.SOURCE
         return q
 
     # ------------------------------------------------------------------
     def close(self) -> None:
-        if self._db is not None:
+        if self._repository is not None and self._owns_repository:
             try:
-                self._db.close()
+                self._repository.close()
             except Exception:
                 pass
-            self._db = None
+        self._repository = None
+        self._owns_repository = False

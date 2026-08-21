@@ -27,6 +27,7 @@ from quote_api.quote_base import (
 )
 from quote_api.quote_factory import QuoteAPIFactory, QuoteSource
 from quote_api.cached_api import CachedQuoteAPI
+from quote_api.repository import MarketDataRepository
 from quote_api.futu import FutuQuoteAPI, FutuQuoteError
 from quote_api.stock_meta import (
     STOCK_META,
@@ -47,6 +48,7 @@ __all__ = [
     "QuoteAPIFactory",
     "QuoteSource",
     "CachedQuoteAPI",
+    "MarketDataRepository",
     "FutuQuoteAPI",
     "FutuQuoteError",
     "STOCK_META",

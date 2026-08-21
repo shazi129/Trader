@@ -3,10 +3,10 @@
 
 替代旧的 trader_utils.py 中相关功能：
 - 通过 quote_api（行情统一抽象）拉取 K 线
-- 写入新版长表 StockDB（kline_daily）
+- 写入行情域 ``MarketDataRepository``（kline_daily）
 - 增量更新：从数据库最新日期 + 1 开始拉
 
-指标因子的计算/落库由 quantitative/ 模块负责，本模块只关心 K 线。
+量化特征的计算和存储由 quantitative/ 模块负责，本模块只关心 K 线。
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 import config
-from database.stock_db_utils import StockDB
 from quote_api import QuoteAPIFactory, DailyQuote, StockMarket
+from quote_api.repository import MarketDataRepository
 
 
 # ---------------------------------------------------------------------------
@@ -35,10 +35,10 @@ def update_stocket(stock_key: str, source: Optional[str] = None) -> int:
         print(f"update_stocket skip: {stock_key} not supported by {api.SOURCE}")
         return 0
 
-    db = StockDB()
+    repository = MarketDataRepository()
     try:
         # 起点：DB 最新日期 + 1，否则从上市日期
-        latest = db.get_latest_date(stock_key)
+        latest = repository.latest_date(stock_key)
         if latest:
             begin = datetime.strptime(latest, "%Y-%m-%d") + timedelta(days=1)
         else:
@@ -61,12 +61,12 @@ def update_stocket(stock_key: str, source: Optional[str] = None) -> int:
             print(f"update_stocket {stock_key}: no new data")
             return 0
 
-        db.write_kline_data_many(stock_key, quotes)
+        repository.save_many(stock_key, quotes)
         print(f"update_stocket {stock_key}: +{len(quotes)} klines "
               f"({quotes[0].date} ~ {quotes[-1].date})")
         return len(quotes)
     finally:
-        db.close()
+        repository.close()
 
 
 # ---------------------------------------------------------------------------

@@ -6,7 +6,7 @@
 设计要点：
 - ``create()`` / ``create_with_cache()`` 默认走**单例缓存**：同一进程
   内同一 source + adjustment 复用同一个上游 API 实例，避免重复实例化和多份 DB
-  连接（``CachedQuoteAPI`` 内部会懒加载 ``StockDB``，每个新实例都
+  连接（``CachedQuoteAPI`` 内部会懒加载行情仓储，每个新实例都
   会开一个新连接）。
 - 如需绕过缓存（例如测试场景），传 ``cached=False`` 即可。
 - ``clear_cache()`` 用于显式释放（主要给测试和长时进程使用）。

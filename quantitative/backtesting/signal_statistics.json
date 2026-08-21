@@ -1,0 +1,385 @@
+{
+  "model_version": "signal_model_v1",
+  "generated_at": "2026-08-21T12:05:17",
+  "horizons": [
+    5,
+    20,
+    60
+  ],
+  "universe": [
+    "AG",
+    "APPLE",
+    "Alibaba",
+    "GOOGLE",
+    "GuoTou",
+    "ICBC",
+    "MaoTai",
+    "NVIDIA",
+    "SNDK",
+    "Tencent",
+    "XiaoMi"
+  ],
+  "data_cutoff": "2026-08-20",
+  "metrics": {
+    "bollinger_lower_touch": {
+      "5": {
+        "samples": 6670,
+        "successes": 3452,
+        "success_rate": 0.517541,
+        "weight": 0.034821
+      },
+      "20": {
+        "samples": 6670,
+        "successes": 3545,
+        "success_rate": 0.531484,
+        "weight": 0.0625
+      },
+      "60": {
+        "samples": 6670,
+        "successes": 3606,
+        "success_rate": 0.54063,
+        "weight": 0.080655
+      }
+    },
+    "bollinger_upper_touch": {
+      "5": {
+        "samples": 8819,
+        "successes": 4149,
+        "success_rate": 0.470462,
+        "weight": 0.058744
+      },
+      "20": {
+        "samples": 8819,
+        "successes": 3906,
+        "success_rate": 0.442907,
+        "weight": 0.113542
+      },
+      "60": {
+        "samples": 8819,
+        "successes": 3646,
+        "success_rate": 0.413426,
+        "weight": 0.172173
+      }
+    },
+    "bullish_volume_expansion": {
+      "5": {
+        "samples": 4575,
+        "successes": 2393,
+        "success_rate": 0.52306,
+        "weight": 0.045622
+      },
+      "20": {
+        "samples": 4575,
+        "successes": 2464,
+        "success_rate": 0.538579,
+        "weight": 0.076324
+      },
+      "60": {
+        "samples": 4575,
+        "successes": 2473,
+        "success_rate": 0.540546,
+        "weight": 0.080216
+      }
+    },
+    "ma_5_20_death_cross": {
+      "5": {
+        "samples": 1039,
+        "successes": 506,
+        "success_rate": 0.487007,
+        "weight": 0.024793
+      },
+      "20": {
+        "samples": 1039,
+        "successes": 482,
+        "success_rate": 0.463908,
+        "weight": 0.068871
+      },
+      "60": {
+        "samples": 1039,
+        "successes": 476,
+        "success_rate": 0.458133,
+        "weight": 0.07989
+      }
+    },
+    "ma_5_20_golden_cross": {
+      "5": {
+        "samples": 1039,
+        "successes": 535,
+        "success_rate": 0.514918,
+        "weight": 0.028466
+      },
+      "20": {
+        "samples": 1039,
+        "successes": 554,
+        "success_rate": 0.533205,
+        "weight": 0.063361
+      },
+      "60": {
+        "samples": 1039,
+        "successes": 580,
+        "success_rate": 0.558229,
+        "weight": 0.111111
+      }
+    },
+    "ma_alignment_bearish": {
+      "5": {
+        "samples": 6199,
+        "successes": 2926,
+        "success_rate": 0.472012,
+        "weight": 0.055529
+      },
+      "20": {
+        "samples": 6199,
+        "successes": 2924,
+        "success_rate": 0.471689,
+        "weight": 0.056169
+      },
+      "60": {
+        "samples": 6199,
+        "successes": 2850,
+        "success_rate": 0.459752,
+        "weight": 0.079853
+      }
+    },
+    "ma_alignment_bullish": {
+      "5": {
+        "samples": 8708,
+        "successes": 4808,
+        "success_rate": 0.552136,
+        "weight": 0.103677
+      },
+      "20": {
+        "samples": 8708,
+        "successes": 4923,
+        "success_rate": 0.565342,
+        "weight": 0.129938
+      },
+      "60": {
+        "samples": 8708,
+        "successes": 5074,
+        "success_rate": 0.582683,
+        "weight": 0.164421
+      }
+    },
+    "macd_bottom_divergence": {
+      "5": {
+        "samples": 2221,
+        "successes": 1096,
+        "success_rate": 0.493471,
+        "weight": 0.01277
+      },
+      "20": {
+        "samples": 2221,
+        "successes": 1164,
+        "success_rate": 0.524088,
+        "weight": 0.047116
+      },
+      "60": {
+        "samples": 2221,
+        "successes": 1181,
+        "success_rate": 0.531742,
+        "weight": 0.062087
+      }
+    },
+    "macd_death_cross": {
+      "5": {
+        "samples": 1308,
+        "successes": 635,
+        "success_rate": 0.485474,
+        "weight": 0.027982
+      },
+      "20": {
+        "samples": 1308,
+        "successes": 615,
+        "success_rate": 0.470183,
+        "weight": 0.057437
+      },
+      "60": {
+        "samples": 1308,
+        "successes": 590,
+        "success_rate": 0.45107,
+        "weight": 0.094256
+      }
+    },
+    "macd_golden_cross": {
+      "5": {
+        "samples": 1305,
+        "successes": 687,
+        "success_rate": 0.526437,
+        "weight": 0.050923
+      },
+      "20": {
+        "samples": 1305,
+        "successes": 716,
+        "success_rate": 0.548659,
+        "weight": 0.093727
+      },
+      "60": {
+        "samples": 1305,
+        "successes": 758,
+        "success_rate": 0.580843,
+        "weight": 0.15572
+      }
+    },
+    "macd_top_divergence": {
+      "5": {
+        "samples": 2610,
+        "successes": 1208,
+        "success_rate": 0.462835,
+        "weight": 0.072932
+      },
+      "20": {
+        "samples": 2610,
+        "successes": 1161,
+        "success_rate": 0.444828,
+        "weight": 0.108271
+      },
+      "60": {
+        "samples": 2610,
+        "successes": 1006,
+        "success_rate": 0.385441,
+        "weight": 0.224812
+      }
+    },
+    "momentum_20_negative": {
+      "5": {
+        "samples": 12702,
+        "successes": 6148,
+        "success_rate": 0.484018,
+        "weight": 0.031838
+      },
+      "20": {
+        "samples": 12702,
+        "successes": 5969,
+        "success_rate": 0.469926,
+        "weight": 0.059912
+      },
+      "60": {
+        "samples": 12702,
+        "successes": 5827,
+        "success_rate": 0.458747,
+        "weight": 0.082183
+      }
+    },
+    "momentum_20_positive": {
+      "5": {
+        "samples": 15277,
+        "successes": 8107,
+        "success_rate": 0.530667,
+        "weight": 0.061134
+      },
+      "20": {
+        "samples": 15277,
+        "successes": 8384,
+        "success_rate": 0.548799,
+        "weight": 0.097279
+      },
+      "60": {
+        "samples": 15277,
+        "successes": 8781,
+        "success_rate": 0.574786,
+        "weight": 0.149083
+      }
+    },
+    "price_double_bottom": {
+      "5": {
+        "samples": 2362,
+        "successes": 1242,
+        "success_rate": 0.525826,
+        "weight": 0.05058
+      },
+      "20": {
+        "samples": 2362,
+        "successes": 1321,
+        "success_rate": 0.559272,
+        "weight": 0.116086
+      },
+      "60": {
+        "samples": 2362,
+        "successes": 1307,
+        "success_rate": 0.553345,
+        "weight": 0.104478
+      }
+    },
+    "price_double_top": {
+      "5": {
+        "samples": 1825,
+        "successes": 901,
+        "success_rate": 0.493699,
+        "weight": 0.012267
+      },
+      "20": {
+        "samples": 1825,
+        "successes": 878,
+        "success_rate": 0.481096,
+        "weight": 0.0368
+      },
+      "60": {
+        "samples": 1825,
+        "successes": 932,
+        "success_rate": 0.510685,
+        "weight": 0.0208
+      }
+    },
+    "rsi_14_overbought": {
+      "5": {
+        "samples": 2807,
+        "successes": 1234,
+        "success_rate": 0.439615,
+        "weight": 0.118656
+      },
+      "20": {
+        "samples": 2807,
+        "successes": 1194,
+        "success_rate": 0.425365,
+        "weight": 0.146657
+      },
+      "60": {
+        "samples": 2807,
+        "successes": 1226,
+        "success_rate": 0.436765,
+        "weight": 0.124256
+      }
+    },
+    "rsi_14_oversold": {
+      "5": {
+        "samples": 1332,
+        "successes": 735,
+        "success_rate": 0.551802,
+        "weight": 0.099855
+      },
+      "20": {
+        "samples": 1332,
+        "successes": 750,
+        "success_rate": 0.563063,
+        "weight": 0.121563
+      },
+      "60": {
+        "samples": 1332,
+        "successes": 797,
+        "success_rate": 0.598348,
+        "weight": 0.18958
+      }
+    },
+    "volatility_contraction": {
+      "5": {
+        "samples": 12665,
+        "successes": 6551,
+        "success_rate": 0.517252,
+        "weight": 0.034369
+      },
+      "20": {
+        "samples": 12665,
+        "successes": 6601,
+        "success_rate": 0.5212,
+        "weight": 0.042234
+      },
+      "60": {
+        "samples": 12665,
+        "successes": 6681,
+        "success_rate": 0.527517,
+        "weight": 0.054817
+      }
+    }
+  }
+}

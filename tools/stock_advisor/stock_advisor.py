@@ -9,10 +9,9 @@
     python -m tools.stock_advisor.stock_advisor Tencent --no-write   # 只看不落盘
 
 流程：
-1. 读 DB 中该股票的 K 线 + 6 张因子表
-2. 若 K 线为空 / 因子最新日期 ≠ K 线最新日期 → 调
-   ``compute_and_save_factors`` 重新拉算并写回
-3. 用 ``QuantAnalyzer`` 跑一次单点多因子打分（短期信号判断）
+1. 从行情仓储读取 K 线，从量化仓储读取特征快照
+2. 若 K 线为空或特征落后，统一重新物化特征
+3. 用形态信号和回测统计生成多周期概率
 4. 用 ``HorizonBacktester`` 跑历史相似态匹配，得 5/20/60 日上涨概率
 5. 把上述结果合成一份 markdown，控制台打印 + 落盘到 reports/
 """
@@ -21,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import subprocess
 import sys
 from contextlib import closing
 from pathlib import Path
@@ -34,18 +32,24 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 import config  # noqa: E402
-from database.stock_db_utils import StockDB  # noqa: E402
-from quantitative.analyzer import (  # noqa: E402
-    AnalysisReport,
-    QuantFactorEngine,
-    compute_probability,
-    compute_period_probabilities,
-    generate_summary,
+from financial_reports.repository import FinancialReportRepository  # noqa: E402
+from financial_reports.analysis import FundamentalSnapshot, build_snapshot  # noqa: E402
+from quote_api.repository import MarketDataRepository  # noqa: E402
+from quantitative.analysis import (  # noqa: E402
+    QuantitativeAnalysisService,
+    QuantitativeReport,
 )
-from quantitative.factor_batch import compute_and_save_factors  # noqa: E402
+from quantitative.backtesting import (  # noqa: E402
+    BacktestArtifactRepository,
+    SignalBacktester,
+)
+from quantitative.features import (  # noqa: E402
+    FeatureRepository,
+    FeatureSnapshot,
+    materialize_symbol,
+)
 from quote_api import QuoteAPIFactory  # noqa: E402
 from quote_api.quote_base import DailyQuote  # noqa: E402
-from quantitative.factor_data import KlineIndicator  # noqa: E402
 from utils.logger import get_logger  # noqa: E402
 
 # 直接跑文件（python stock_advisor.py）时 __package__ 为空，相对 import 会失败；
@@ -53,17 +57,11 @@ from utils.logger import get_logger  # noqa: E402
 # 用 try/except 兼容两种入口。
 try:
     from .backtester import HorizonBacktester, MultiHorizonForecast  # noqa: E402
-    from .fundamental_view import (  # noqa: E402
-        FundamentalSnapshot, build_snapshot,
-    )
     from .fundamental_trend import (  # noqa: E402
         FundamentalTrend, analyze_long_term,
     )
 except ImportError:
     from backtester import HorizonBacktester, MultiHorizonForecast  # type: ignore  # noqa: E402
-    from fundamental_view import (  # type: ignore  # noqa: E402
-        FundamentalSnapshot, build_snapshot,
-    )
     from fundamental_trend import (  # type: ignore  # noqa: E402
         FundamentalTrend, analyze_long_term,
     )
@@ -79,22 +77,23 @@ DEFAULT_REPORT_DIR = _THIS_DIR / "reports"
 
 def _load_or_build(name_key: str, api: str, db_path: Optional[str],
                    force_refresh: bool = False
-                   ) -> tuple[list[DailyQuote], list[KlineIndicator]]:
-    """读 DB；若 K 线为空 / 因子表落后于 K 线 → 重算后再读。
+                   ) -> tuple[list[DailyQuote], list[FeatureSnapshot]]:
+    """读仓储；若 K 线为空 / 特征快照落后于 K 线 → 重算后再读。
 
     判定策略（用户需求 ②A）：
-    - K 线最新日期 == 因子表最新日期 → 直接用 DB
-    - 否则 → 调 ``compute_and_save_factors`` 完整重算入库
+    - K 线最新日期 == 特征最新日期 → 直接读仓储
+    - 否则 → 重新物化完整特征序列
     - ``force_refresh=True`` 强制重算（绕过缓存）
     """
-    with closing(StockDB(db_path)) as db:
-        kline_latest = db.get_latest_date(name_key)
-        ind_latest = db.get_latest_indicator_date(name_key)
+    with closing(MarketDataRepository(db_path)) as market_repository:
+        kline_latest = market_repository.latest_date(name_key)
+    with closing(FeatureRepository(db_path)) as feature_repository:
+        feature_latest = feature_repository.latest_date(name_key)
 
     need_recompute = (
         force_refresh
         or kline_latest is None
-        or ind_latest != kline_latest
+        or feature_latest != kline_latest
     )
 
     if need_recompute:
@@ -102,24 +101,25 @@ def _load_or_build(name_key: str, api: str, db_path: Optional[str],
             "强制刷新"
             if force_refresh
             else ("DB 无该股票数据" if kline_latest is None
-                  else f"因子表(latest={ind_latest}) ≠ K线(latest={kline_latest})")
+                  else f"特征(latest={feature_latest}) ≠ K线(latest={kline_latest})")
         )
         _log.info("[%s] 触发重算: %s", name_key, reason)
-        ok = compute_and_save_factors(
-            name_key, api_name=api, db_path=db_path,
-            limit=5000, force_refresh=force_refresh,
+        count = materialize_symbol(
+            name_key, source=api, db_path=db_path,
+            force_refresh=force_refresh,
         )
-        if not ok:
+        if not count:
             _log.error("[%s] 重算失败", name_key)
             return [], []
     else:
-        _log.info("[%s] DB 已最新（K线=因子=%s），直接读", name_key, kline_latest)
+        _log.info("[%s] 仓储已最新（K线=特征=%s），直接读", name_key, kline_latest)
 
     # 重算完再读一次（重算逻辑里已写库），保证调用方拿到的是 DB 视图
-    with closing(StockDB(db_path)) as db:
-        quotes = db.get_klines_in_range(name_key)
-        indicators = db.read_all_indicators_in_range(name_key)
-    return quotes, indicators
+    with closing(MarketDataRepository(db_path)) as market_repository:
+        quotes = market_repository.get_range(name_key)
+    with closing(FeatureRepository(db_path)) as feature_repository:
+        features = feature_repository.get_range(name_key)
+    return quotes, features
 
 
 # ===========================================================================
@@ -139,7 +139,7 @@ def _direction_icon(prob_up: Optional[float]) -> str:
     return _HORIZON_ICONS[None]
 
 
-def _build_markdown(report: AnalysisReport,
+def _build_markdown(report: QuantitativeReport,
                     forecast: Optional[MultiHorizonForecast],
                     name_key: str,
                     backtest_n: Optional[int] = None,
@@ -147,7 +147,7 @@ def _build_markdown(report: AnalysisReport,
                     fundamental_trend: Optional[FundamentalTrend] = None) -> str:
     """组合 markdown 报告。"""
     lines: list[str] = []
-    lines.append(f"# {report.stock_name}({name_key}) 综合分析报告")
+    lines.append(f"# {report.name}({name_key}) 综合分析报告")
     lines.append("")
     lines.append(f"- 数据源: {report.data_source}")
     lines.append(f"- 数据量: {report.data_days} 天")
@@ -155,62 +155,30 @@ def _build_markdown(report: AnalysisReport,
         # 回测器剔除了非正收盘价后的可用样本数，明确标出避免误解
         lines.append(f"- 回测可用样本: {backtest_n} 天"
                      f"（已剔除前复权溢出的 {report.data_days - backtest_n} 条）")
-    lines.append(f"- 最新价: {report.latest_price:.2f}")
+    lines.append(f"- 分析时点: {report.anchor_date}")
+    lines.append(f"- 基准价: {report.anchor_price:.2f}")
     lines.append(f"- 生成时间: "
                  f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     lines.append("")
 
-    # ---- 当前状态评分（来自 QuantAnalyzer）----
-    # 注意：这一节是"此刻强弱"的快照，不是对未来涨跌的预测。
-    # 与下一节「多周期预测」结论可能相反，两者互补（详见本节末尾说明）。
-    lines.append("## 1. 当前状态评分（多因子加权快照）")
+    lines.append("## 1. 指标形态加权预测")
     lines.append("")
-    lines.append(f"- 趋势: **{report.trend}**")
-    lines.append(f"- 当前因子加权偏多强度: **{report.probability_up * 100:.1f}%**")
-    lines.append(f"- 当前因子加权偏空强度: **{report.probability_down * 100:.1f}%**")
+    lines.append("> 只聚合当前实际触发的形态；权重和方向成功率来自无未来函数回测。")
     lines.append("")
-    lines.append("> **这不是涨跌预测**，而是把当前这一天的全部因子打分加权后，"
-                 "线性映射到 [0.15, 0.85] 得到的**此刻多空力量对比快照**，"
-                 "无期限含义。下一节的"
-                 "「多周期预测」才是基于历史相似态给出的未来 N 天上涨概率。")
+    lines.append("| 周期 | 上涨概率 | 下跌概率 | 趋势 | 有效信号 |")
+    lines.append("|------|----------|----------|------|----------|")
+    for days, result in sorted(report.horizons.items()):
+        lines.append(
+            f"| {_direction_icon(result.probability_up)} {days}日 "
+            f"| {result.probability_up:.1%} | {result.probability_down:.1%} "
+            f"| {result.trend} | {result.contributing_signals} |"
+        )
     lines.append("")
-
-    # ---- 分周期（短/中/长）因子聚合 ----
-    # 复用第 1 节的因子快照，按周期桶（FACTOR_BUCKET）重新加权聚合，
-    # 权重优先取 period_weights.json（由 optimize_period_weights.py 生成），
-    # 未生成时回退到因子自带权重。这给出"短线 / 中线 / 长线"三个维度的多空判断。
-    lines.append("## 1.1 分周期因子判断（短 / 中 / 长）")
-    lines.append("")
-    lines.append("> 把同一批因子按**预测周期**分成短(≤20日) / 中(≤60日) / 长(>60日)"
-                 "三桶，分别加权聚合。同一天可能出现「短线偏多、长线偏空」的分化，"
-                 "反映不同持有周期下的多空力量差异。")
-    lines.append("")
-    pp = report.period_probs or {}
-    if pp:
-        _PP_LABELS = {"short": "短线(≤20日)", "medium": "中线(≤60日)", "long": "长线(>60日)"}
-        lines.append("| 周期 | 净强度 | 上涨概率 | 下跌概率 | 趋势 |")
-        lines.append("|------|--------|----------|----------|------|")
-        for key in ("short", "medium", "long"):
-            d = pp.get(key)
-            if not d:
-                continue
-            icon = _direction_icon(d.get("prob_up"))
-            lines.append(
-                f"| {icon} {_PP_LABELS.get(key, key)} "
-                f"| {d['net_strength']:+.3f} "
-                f"| {d['prob_up'] * 100:.1f}% "
-                f"| {d['prob_down'] * 100:.1f}% "
-                f"| {d['trend']} |"
-            )
-        lines.append("")
-    else:
-        lines.append("> 暂无分周期因子数据。")
-        lines.append("")
 
     # ---- 多周期预测（来自 HorizonBacktester）----
     lines.append("## 2. 多周期涨跌预测（历史相似态回测）")
     lines.append("")
-    lines.append("> 做法：找出历史上与当前因子组合最相似的 top-K 天，"
+    lines.append("> 做法：找出历史上与当前特征向量最相似的 top-K 天，"
                  "统计这些历史日 N 天后的真实涨跌。"
                  "**与第 1 节可能相反是正常的** —— "
                  "比如当前超卖（第 1 节偏空），但历史上每次跌到此位后"
@@ -244,13 +212,13 @@ def _build_markdown(report: AnalysisReport,
             lines.append(f"- **{fc.label}**：{fc.reason}")
         lines.append("")
 
-        lines.append("### 当前因子的「极端度」（z 分数绝对值，越大越偏离历史均值）")
+        lines.append("### 当前特征的「极端度」（z 分数绝对值，越大越偏离历史均值）")
         lines.append("")
         contrib_sorted = sorted(
             forecast.feature_contribution.items(),
             key=lambda x: x[1], reverse=True,
         )
-        lines.append("| 因子 | |z| | 解读 |")
+        lines.append("| 特征 | |z| | 解读 |")
         lines.append("|------|-----|------|")
         for name, z in contrib_sorted:
             tag = "极端" if z > 2 else ("偏离" if z > 1 else "正常")
@@ -263,8 +231,7 @@ def _build_markdown(report: AnalysisReport,
             lines.append(", ".join(forecast.top_similar_dates))
             lines.append("")
 
-    # ---- 因子明细（直接复用 QuantAnalyzer 的 summary，但去掉头部）----
-    lines.append("## 3. 因子明细（单点信号）")
+    lines.append("## 3. 当前触发的指标形态")
     lines.append("")
     lines.append("```")
     lines.append(report.summary)
@@ -624,41 +591,25 @@ def analyze_stock(name_key: str, *, api: Optional[str] = None,
         return None
 
     # 1. 读 / 算 数据
-    quotes, indicators = _load_or_build(name_key, api, db_path,
-                                         force_refresh=force_refresh)
+    quotes, features = _load_or_build(name_key, api, db_path,
+                                      force_refresh=force_refresh)
     if not quotes:
         _log.error("[%s] 无法获取行情数据", name_key)
         return None
-    if not indicators:
-        _log.error("[%s] 无法获取因子数据", name_key)
+    if not features:
+        _log.error("[%s] 无法获取量化特征", name_key)
         return None
 
-    # 2. QuantAnalyzer 等价的多因子打分（直接复用底层引擎，避免再发一次 API）
-    engine = QuantFactorEngine(quotes, fundamentals=None)
-    factors = engine.compute_all()
-    prob_up, prob_down, trend = compute_probability(factors)
-
-    # 2b. 分周期（短/中/长）聚合，使用 period_weights.json（若已生成）
-    period_probs = compute_period_probabilities(factors)
-
-    report = AnalysisReport(
-        stock_name=stock_info.name,
-        name_key=name_key,
-        data_source=api,
-        data_days=len(quotes),
-        latest_price=quotes[-1].close,
-        factors=factors,
-        bullish_score=round(prob_up * 100, 1),
-        bearish_score=round(prob_down * 100, 1),
-        trend=trend,
-        probability_up=prob_up,
-        probability_down=prob_down,
-        period_probs=period_probs,
-    )
-    report.summary = generate_summary(report)
+    # 2. 统一量化服务：特征 → 形态 → 回测权重 → 多周期概率
+    quote_impl = QuoteAPIFactory.create(api)
+    service = QuantitativeAnalysisService(quote_impl)
+    report = service.analyze_quotes(name_key, quotes)
+    if report is None:
+        _log.error("[%s] 量化分析失败", name_key)
+        return None
 
     # 3. 多周期相似态回测
-    bt = HorizonBacktester(quotes, indicators)
+    bt = HorizonBacktester(quotes, features)
     forecast = bt.run(top_k=top_k)
 
     # 4. 基本面快照（最新一份已公告财报；缺数据自动 fallback 到 None）
@@ -666,11 +617,11 @@ def analyze_stock(name_key: str, *, api: Optional[str] = None,
     fundamental: Optional[FundamentalSnapshot] = None
     fundamental_trend: Optional[FundamentalTrend] = None
     try:
-        with closing(StockDB(db_path)) as db:
-            fundamental = build_snapshot(name_key, db,
+        with closing(FinancialReportRepository(db_path)) as repository:
+            fundamental = build_snapshot(name_key, repository,
                                           as_of=quotes[-1].date)
             # 长期分析需要全量历史 rows + 当前价 + 历史股价
-            rows = db.get_financial_reports(name_key)
+            rows = repository.get_reports(name_key)
             cutoff = quotes[-1].date
             rows_pit = [r for r in rows
                         if r.get("AnnounceDate") and r["AnnounceDate"] <= cutoff]
@@ -712,28 +663,20 @@ def analyze_stock(name_key: str, *, api: Optional[str] = None,
 # 权重重生成
 # ===========================================================================
 
-def _regenerate_period_weights(db_path: Optional[str] = None) -> bool:
-    """调用 quantitative/analyzer/optimize_period_weights.py 重新生成
-    分周期因子权重（period_weights.json）。
-
-    该脚本会遍历 config.global_stock_list 全部股票，按 5 个预测周期算
-    横截面 Rank IC，再按桶取 |ICIR| 最大档定权，输出到 analyzer 目录。
-    """
-    target = _ROOT / "quantitative" / "analyzer" / "optimize_period_weights.py"
-    if not target.exists():
-        _log.error("未找到权重优化脚本: %s", target)
-        return False
-
-    cmd = [sys.executable, str(target)]
-    if db_path:
-        cmd.extend(["--db", db_path])
-    _log.info("运行权重优化: %s", " ".join(cmd))
+def _rebuild_signal_statistics(db_path: Optional[str] = None) -> bool:
+    """重新回测全部注册形态并生成版本化成功率/权重。"""
     try:
-        proc = subprocess.run(cmd, cwd=str(_ROOT), check=False)
+        with MarketDataRepository(db_path) as repository:
+            datasets = {
+                symbol: repository.get_range(symbol)
+                for symbol in config.global_stock_list
+            }
+        artifact = SignalBacktester().run(datasets)
+        BacktestArtifactRepository().save(artifact)
     except Exception as e:  # noqa: BLE001
-        _log.error("权重优化脚本执行异常: %s", e)
+        _log.error("形态回测执行异常: %s", e)
         return False
-    return proc.returncode == 0
+    return True
 
 
 # ===========================================================================
@@ -744,7 +687,7 @@ def main() -> int:
     current_api = QuoteAPIFactory.current_source()
     available_apis = QuoteAPIFactory.available_sources()
     parser = argparse.ArgumentParser(
-        description="股票综合分析工具：行情/因子/历史相似态预测",
+        description="股票综合分析工具：行情/形态信号/历史相似态预测",
     )
     parser.add_argument("stock", help="股票 name_key (如 Tencent)")
     parser.add_argument(
@@ -759,19 +702,17 @@ def main() -> int:
     parser.add_argument("--no-write", action="store_true",
                         help="不落盘 markdown，仅控制台输出")
     parser.add_argument("--force-refresh", action="store_true",
-                        help="强制从 API 重新拉算因子（忽略 DB 缓存）")
-    parser.add_argument("--regen-weights", action="store_true",
-                        help="重新生成分周期因子权重（period_weights.json）"
-                             "后，再出报告")
+                        help="强制从 API 重新拉取行情并物化特征")
+    parser.add_argument("--rebuild-signal-stats", action="store_true",
+                        help="重新回测形态成功率、样本量和权重后再出报告")
     parser.add_argument("--report-dir", help="自定义报告目录")
     args = parser.parse_args()
 
     report_dir = Path(args.report_dir) if args.report_dir else None
 
-    # 可选：先重生成分周期权重（基于全股票池的 Rank IC）
-    if args.regen_weights:
-        _regenerate_period_weights(args.db)
-        print("\n分周期权重已重算，继续出报告……\n")
+    if args.rebuild_signal_stats:
+        _rebuild_signal_statistics(args.db)
+        print("\n形态回测统计已重建，继续出报告……\n")
 
     try:
         path = analyze_stock(

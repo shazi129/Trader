@@ -130,7 +130,7 @@ def analyze_long_term(rows: list[dict],
                       ) -> Optional[FundamentalTrend]:
     """从财报历史 rows 算长期趋势 + 预测 + 隐含估值。
 
-    :param rows: ``StockDB.get_financial_reports()`` 的返回值（按 PeriodEnd 升序，
+    :param rows: ``FinancialReportRepository.get_reports()`` 的返回值（按 PeriodEnd 升序，
         已 PIT 过滤）。
     :param current_price: 当前股价。None 时跳过隐含估值计算。
     :param lookback: 回看期数；rows 不足时取全部。

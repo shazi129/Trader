@@ -7,9 +7,8 @@
 外层调用流程：
     1. ``ParserFactory.detect(pdf_path)`` 自动选解析器；
     2. ``parser.parse(pdf_path, name_key)`` → ``FinancialReport``；
-    3. ``StockDB.write_financial_report(report)`` 入库；
-    4. （后续）``PITBuilder`` 按 ``announce_date`` 生成日频 PIT 派生表，
-       接入 ``KlineIndicator``。
+    3. ``FinancialReportRepository.save(report)`` 入库；
+    4. ``build_snapshot`` 按公告日生成 point-in-time 基本面视图。
 """
 
 from __future__ import annotations
@@ -18,6 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 from financial_reports.models import FinancialReport
 from financial_reports.parser_base import FinancialParser, ParserError
+from financial_reports.repository import FinancialReportRepository
+from financial_reports.analysis import FundamentalSnapshot, build_snapshot
 
 if TYPE_CHECKING:
     from financial_reports.parser_factory import ParserFactory
@@ -33,6 +34,9 @@ def __getattr__(name: str) -> Any:
 __all__ = [
     "FinancialReport",
     "FinancialParser",
+    "FinancialReportRepository",
+    "FundamentalSnapshot",
+    "build_snapshot",
     "ParserError",
     "ParserFactory",
 ]

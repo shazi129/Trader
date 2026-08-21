@@ -48,10 +48,10 @@ _ROOT = _THIS_DIR.parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from database.stock_db_utils import StockDB  # noqa: E402
 from financial_reports import (  # noqa: E402
     ParserFactory,
     FinancialReport,
+    FinancialReportRepository,
     ParserError,
 )
 from utils.logger import get_logger  # noqa: E402
@@ -118,8 +118,8 @@ def run_folder(folder: Path, name_key: str, *,
     # 已入库的 PeriodEnd 集合（用于 --skip-existing）
     existing: set[str] = set()
     if skip_existing and not dry_run:
-        with closing(StockDB(db_path)) as db:
-            rows = db.get_financial_reports(name_key)
+        with closing(FinancialReportRepository(db_path)) as repository:
+            rows = repository.get_reports(name_key)
             existing = {r["PeriodEnd"] for r in rows}
         _log.info("[%s] DB 已有 %d 份报告", name_key, len(existing))
 
@@ -147,8 +147,8 @@ def run_folder(folder: Path, name_key: str, *,
         )
 
     if parsed_reports and not dry_run:
-        with closing(StockDB(db_path)) as db:
-            db.write_financial_reports_many(parsed_reports)
+        with closing(FinancialReportRepository(db_path)) as repository:
+            repository.save_many(parsed_reports)
         _log.info("[%s] 入库完成: %d 份", name_key, len(parsed_reports))
     elif dry_run:
         _log.info("[%s] dry-run 模式，跳过入库（共 %d 份解析成功）",

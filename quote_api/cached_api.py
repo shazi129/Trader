@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-带缓存的行情 API 包装器
+带本地仓储缓存的行情 API 包装器
 
 实现"先读DB，缺失再拉取"的逻辑。
 对调用者透明：使用方式与普通 QuoteAPI 完全一致。
@@ -18,6 +18,7 @@ from quote_api.quote_base import (
     DateLike,
 )
 from quote_api.stock_meta import get_meta
+from quote_api.repository import MarketDataRepository
 from utils.logger import get_logger
 
 _log = get_logger(__name__)
@@ -67,25 +68,27 @@ class CachedQuoteAPI(QuoteAPI):
     或显式调用 ``api.close()``。
     """
 
-    def __init__(self, wrapped_api: QuoteAPI):
+    def __init__(self, wrapped_api: QuoteAPI,
+                 repository: MarketDataRepository | None = None):
         """
         :param wrapped_api: 被包装的真实 API 实例
         """
         super().__init__(adjustment=wrapped_api.adjustment)
         self.SOURCE = wrapped_api.SOURCE + "_cached"
         self._wrapped = wrapped_api
-        self._db = None  # 懒加载
+        self._repository = repository
+        self._owns_repository = repository is None
 
     # ------------------------------------------------------------------
     # 内部方法
     # ------------------------------------------------------------------
 
-    def _get_db(self):
-        """懒加载数据库连接"""
-        if self._db is None:
-            from database.stock_db_utils import StockDB
-            self._db = StockDB()
-        return self._db
+    def _get_repository(self) -> MarketDataRepository:
+        """懒加载行情仓储。"""
+        if self._repository is None:
+            self._repository = MarketDataRepository()
+            self._owns_repository = True
+        return self._repository
 
     def _date_to_str(self, date: DateLike) -> Optional[str]:
         """日期转字符串"""
@@ -97,12 +100,13 @@ class CachedQuoteAPI(QuoteAPI):
 
     def close(self) -> None:
         """关闭内部数据库连接（可重入：再次调用是 no-op）。"""
-        if self._db is not None:
+        if self._repository is not None and self._owns_repository:
             try:
-                self._db.close()
+                self._repository.close()
             except Exception as e:  # pragma: no cover - defensive
                 _log.warning("close cached db error: %s", e)
-            self._db = None
+        self._repository = None
+        self._owns_repository = False
 
     def __enter__(self) -> "CachedQuoteAPI":
         return self
@@ -147,7 +151,7 @@ class CachedQuoteAPI(QuoteAPI):
         4. 最终从 DB 读 ``[sd_target, ed_target]`` 完整序列返回；
            若传了 ``limit``，再取尾部 N 条。
         """
-        db = self._get_db()
+        repository = self._get_repository()
         sd = self._date_to_str(start_date)
         ed = self._date_to_str(end_date)
         wrapped_source = self._wrapped.SOURCE
@@ -164,7 +168,7 @@ class CachedQuoteAPI(QuoteAPI):
             if meta and meta.listing_date:
                 sd_target = meta.listing_date
             else:
-                # meta 缺失：保守起点（足够覆盖大多数因子的最长窗口）
+                # meta 缺失：保守起点（足够覆盖多数技术特征的最长窗口）
                 sd_target = (
                     _date.today() - timedelta(days=BATCH_CALENDAR_DAYS)
                 ).strftime("%Y-%m-%d")
@@ -173,7 +177,7 @@ class CachedQuoteAPI(QuoteAPI):
             return []
 
         # ---- 2) 确定补拉起点 ---------------------------------------------
-        latest_in_db = db.get_latest_date(name)
+        latest_in_db = repository.latest_date(name)
         if latest_in_db is None:
             need_fetch_from: Optional[str] = sd_target
         elif latest_in_db < ed_target:
@@ -202,15 +206,15 @@ class CachedQuoteAPI(QuoteAPI):
                                  name, i, len(batches), b_s, b_e, exc)
                     continue
                 if fresh:
-                    db.write_kline_data_many(name, fresh)
+                    repository.save_many(name, fresh)
                     _log.info(
                         "%s: 第 %d/%d 批 %s~%s 入库 %d 条",
                         name, i, len(batches), b_s, b_e, len(fresh),
                     )
 
         # ---- 4) 从 DB 读完整区间 ----------------------------------------
-        result = db.get_klines_in_range(name, start_date=sd_target,
-                                        end_date=ed_target)
+        result = repository.get_range(name, start_date=sd_target,
+                                      end_date=ed_target)
         for q in result:
             q.source = wrapped_source
         # limit 仅做尾部截断，不影响上游拉取范围
@@ -233,10 +237,10 @@ class CachedQuoteAPI(QuoteAPI):
         target = self._date_to_str(date)
 
         # 先查数据库
-        db = self._get_db()
+        repository = self._get_repository()
 
         if target:
-            cached = db.get_daily_quote_by_date(name, target)
+            cached = repository.get_by_date(name, target)
             if cached:
                 cached.source = self._wrapped.SOURCE
                 _log.info("从数据库返回单日数据: %s", target)
@@ -245,7 +249,7 @@ class CachedQuoteAPI(QuoteAPI):
         # 数据库没有，调用 API
         quote = self._wrapped.get_daily_quote(name, date)
         if quote:
-            db.write_kline_data(name, quote)
+            repository.save(name, quote)
         return quote
 
     # ------------------------------------------------------------------

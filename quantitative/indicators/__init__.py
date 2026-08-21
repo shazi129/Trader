@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """可复用的技术指标算法。
 
-所有指标实现为**纯函数**（输入序列，输出序列），与具体的数据结构
-（DailyQuote / KlineIndicator）解耦。FactorSeriesEngine（批量写库）
-和 QuantFactorEngine（单点信号）共享同一份实现，避免重复。
+所有指标实现为**纯函数**（输入序列，输出序列），与具体的数据结构解耦。
+``FeatureCalculator`` 是唯一的特征物化入口，信号规则消费已计算特征。
 
 模块划分：
 - primitives  : SMA/EMA/STD/TR/+DM/-DM/Wilder smoothing 等基础原语

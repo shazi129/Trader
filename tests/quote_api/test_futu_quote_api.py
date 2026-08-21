@@ -217,7 +217,7 @@ def test_factory_exposes_current_and_available_sources(monkeypatch):
 
     monkeypatch.setattr(config, "QUOTE_SOURCE", "tencent")
     assert QuoteAPIFactory.current_source() == "tencent"
-    assert QuoteAPIFactory.available_sources() == ["futu", "tencent", "sina"]
+    assert QuoteAPIFactory.available_sources() == ["futu", "tencent", "sina", "db"]
 
     monkeypatch.setattr(config, "QUOTE_SOURCE", "removed-provider")
     assert QuoteAPIFactory.current_source() == "futu"
