@@ -113,13 +113,16 @@ quotes + feature snapshots
 历史 K 线
     → 一次性计算全量特征
     → 在每个历史 anchor 仅使用 anchor 之前的数据判断形态
+    → 背离按价格与趋势确认事件去重
     → 用 anchor+h 的收盘价验证方向
-    → success_rate + sample_size + reliability weight
+    → 与标的/周期基础方向率比较并执行显著性检验
+    → 反向候选执行扩展窗口走步样本外验证
+    → validated edge + event sample size + reliability weight
     → signal_statistics.json
 ```
 
-统一周期为 5、20、60 个交易日。权重同时考虑偏离随机水平的程度和样本量，
-不再把一个没有样本量的 `accuracy` 数字直接当概率权重。
+统一周期为 5、20、60 个交易日。权重同时考虑相对匹配基准的显著超额和样本量；
+未显著超越基准的信号权重为 0，样本内失败也不会被自动解释成反向指标。
 
 ### 时点分析
 

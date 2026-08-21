@@ -112,42 +112,77 @@ def test_signal_engine_has_stable_explicit_registry():
 
 
 def test_aggregation_ignores_inactive_signals_and_respects_direction():
-    artifact = BacktestArtifact(metrics={
-        "bull": {"20": SignalMetric(100, 70, 0.7, 0.4)},
-        "bear": {"20": SignalMetric(100, 70, 0.7, 0.4)},
-    })
+    artifact = BacktestArtifact(
+        baselines={"Example": {"20": 0.55}},
+        pooled_baselines={"20": 0.5},
+        metrics={
+            "bull": {"20": SignalMetric(
+                100, 65, 0.65, 0.2,
+                baseline_success_rate=0.55,
+                excess_success_rate=0.10,
+                direction_multiplier=1,
+            )},
+            "bear": {"20": SignalMetric(
+                100, 65, 0.65, 0.2,
+                baseline_success_rate=0.45,
+                excess_success_rate=0.20,
+                direction_multiplier=1,
+            )},
+        },
+    )
     inactive = SignalResult("inactive", "inactive", "x", False, 0)
     bullish = SignalResult("bull", "bull", "x", True, 1)
-    result = aggregate_signals([inactive, bullish], artifact, horizons=(20,))[20]
-    assert result.probability_up == 0.6333
+    result = aggregate_signals(
+        [inactive, bullish], artifact, horizons=(20,), symbol="Example"
+    )[20]
+    assert result.probability_up == 0.65
+    assert result.baseline_probability_up == 0.55
 
     bearish = SignalResult("bear", "bear", "x", True, -1)
-    result = aggregate_signals([bearish], artifact, horizons=(20,))[20]
-    assert result.probability_up == 0.3667
+    result = aggregate_signals(
+        [bearish], artifact, horizons=(20,), symbol="Example"
+    )[20]
+    assert result.probability_up == 0.35
 
 
-def test_signal_contributions_explain_reversed_historical_direction():
-    artifact = BacktestArtifact(metrics={
-        "bull": {"20": SignalMetric(100, 70, 0.7, 0.4)},
-        "bear": {"20": SignalMetric(100, 40, 0.4, 0.6)},
-    })
-    bullish = SignalResult("bull", "bull", "test", True, 1)
-    bearish = SignalResult("bear", "bear", "test", True, -1)
+def test_signal_contributions_only_reverse_when_artifact_validated_it():
+    artifact = BacktestArtifact(
+        pooled_baselines={"20": 0.5},
+        metrics={
+            "unvalidated": {"20": SignalMetric(
+                100, 40, 0.4, 0.0,
+                baseline_success_rate=0.5,
+                excess_success_rate=-0.1,
+                direction_multiplier=0,
+            )},
+            "validated": {"20": SignalMetric(
+                100, 40, 0.4, 0.2,
+                baseline_success_rate=0.5,
+                excess_success_rate=-0.1,
+                direction_multiplier=-1,
+                oos_samples=30,
+                oos_excess_success_rate=0.12,
+                oos_positive_folds=3,
+                oos_total_folds=3,
+            )},
+        },
+    )
+    unvalidated = SignalResult(
+        "unvalidated", "unvalidated", "test", True, -1
+    )
+    validated = SignalResult("validated", "validated", "test", True, -1)
 
-    contributions = signal_contributions([bullish, bearish], artifact, 20)
+    assert signal_contributions([unvalidated], artifact, 20) == []
+    contributions = signal_contributions([validated], artifact, 20)
 
-    assert contributions[0].effective_probability_up == pytest.approx(0.633333)
-    assert contributions[0].weight_share == pytest.approx(0.4)
-    assert not contributions[0].is_reversed
-    assert contributions[1].effective_probability_up == pytest.approx(0.566667)
-    assert contributions[1].weight_share == pytest.approx(0.6)
-    assert contributions[1].is_reversed
-    assert sum(
-        item.probability_point_contribution for item in contributions
-    ) == pytest.approx(0.0933333333)
+    assert len(contributions) == 1
+    assert contributions[0].effective_probability_up == pytest.approx(0.6)
+    assert contributions[0].weight_share == pytest.approx(1.0)
+    assert contributions[0].is_reversed
+    assert contributions[0].effective_direction_text == "有效看多"
 
 
-def test_signal_backtest_produces_sample_aware_statistics():
+def test_signal_backtest_requires_edge_over_symbol_baseline():
     class AlwaysBullish(SignalRule):
         signal_id = "always_bullish"
         name = "Always bullish"
@@ -156,17 +191,76 @@ def test_signal_backtest_produces_sample_aware_statistics():
         def evaluate(self, context):
             return self.result(True, 1)
 
-    quotes = [quote(index, 100 + index) for index in range(40)]
+    quotes = [
+        quote(index, 100 if index % 2 == 0 else 110)
+        for index in range(80)
+    ]
     artifact = SignalBacktester(
         engine=SignalEngine([AlwaysBullish()]),
-        horizons=(5,),
-        min_history=10,
+        horizons=(1,),
+        min_history=5,
     ).run({"Example": quotes})
-    metric = artifact.metric("always_bullish", 5)
+    metric = artifact.metric("always_bullish", 1)
+
     assert metric is not None
-    assert metric.samples == 26
-    assert metric.success_rate == 1.0
-    assert 0.0 < metric.weight < 1.0
+    assert metric.success_rate == pytest.approx(
+        artifact.baseline_probability_up("Example", 1)
+    )
+    assert metric.direction_multiplier == 0
+    assert metric.weight == 0.0
+
+
+def test_signal_backtest_validates_reverse_direction_walk_forward():
+    class BearishAtTheLow(SignalRule):
+        signal_id = "bearish_at_low"
+        name = "Bearish at the low"
+        category = "test"
+
+        def evaluate(self, context):
+            return self.result(context.anchor_price < 105, -1)
+
+    quotes = [
+        quote(index, 100 if index % 2 == 0 else 110)
+        for index in range(120)
+    ]
+    artifact = SignalBacktester(
+        engine=SignalEngine([BearishAtTheLow()]),
+        horizons=(1,),
+        min_history=5,
+    ).run({"Example": quotes})
+    metric = artifact.metric("bearish_at_low", 1)
+
+    assert metric is not None
+    assert metric.success_rate == 0.0
+    assert metric.direction_multiplier == -1
+    assert metric.weight > 0
+    assert metric.oos_positive_folds >= 2
+    assert metric.oos_z_score > 0
+
+
+def test_divergence_backtest_counts_one_continuous_window_as_one_event():
+    class ContinuousDivergence(SignalRule):
+        signal_id = "continuous_divergence"
+        name = "Continuous divergence"
+        category = "divergence"
+
+        def evaluate(self, context):
+            return self.result(True, -1)
+
+    quotes = [
+        quote(index, 100 if index % 2 == 0 else 110)
+        for index in range(80)
+    ]
+    artifact = SignalBacktester(
+        engine=SignalEngine([ContinuousDivergence()]),
+        horizons=(1,),
+        min_history=5,
+    ).run({"Example": quotes})
+    metric = artifact.metric("continuous_divergence", 1)
+
+    assert metric is not None
+    assert metric.samples == 1
+    assert metric.weight == 0.0
 
 
 def test_quantitative_analysis_service_runs_end_to_end(tmp_path):

@@ -199,7 +199,10 @@ def _bottom_prices() -> list[float]:
         ("obv_bottom_divergence", "obv"),
     ),
 )
-def test_indicator_bottom_divergence(signal_id: str, feature_key: str):
+def test_indicator_bottom_divergence_is_warning_without_confirmation(
+    signal_id: str,
+    feature_key: str,
+):
     closes = _bottom_prices()
     indicator = [50.0] * len(closes)
     indicator[8] = 20.0
@@ -207,7 +210,8 @@ def test_indicator_bottom_divergence(signal_id: str, feature_key: str):
     values = [{feature_key: value} for value in indicator]
     result = RULES[signal_id].evaluate(_context(values, closes))
     assert result.active
-    assert result.direction == 1
+    assert result.direction == 0
+    assert "风险提示" in result.description
 
 
 @pytest.mark.parametrize(
@@ -218,7 +222,10 @@ def test_indicator_bottom_divergence(signal_id: str, feature_key: str):
         ("obv_top_divergence", "obv"),
     ),
 )
-def test_indicator_top_divergence(signal_id: str, feature_key: str):
+def test_indicator_top_divergence_is_warning_without_confirmation(
+    signal_id: str,
+    feature_key: str,
+):
     closes = [200.0 - value for value in _bottom_prices()]
     indicator = [50.0] * len(closes)
     indicator[8] = 80.0
@@ -226,7 +233,48 @@ def test_indicator_top_divergence(signal_id: str, feature_key: str):
     values = [{feature_key: value} for value in indicator]
     result = RULES[signal_id].evaluate(_context(values, closes))
     assert result.active
-    assert result.direction == -1
+    assert result.direction == 0
+    assert "风险提示" in result.description
+
+
+@pytest.mark.parametrize(
+    ("signal_id", "feature_key", "find_high", "direction"),
+    (
+        ("macd_top_divergence", "macd_dif", True, -1),
+        ("rsi_top_divergence", "rsi_14", True, -1),
+        ("mfi_top_divergence", "mfi_14", True, -1),
+        ("obv_top_divergence", "obv", True, -1),
+        ("macd_bottom_divergence", "macd_dif", False, 1),
+        ("rsi_bottom_divergence", "rsi_14", False, 1),
+        ("mfi_bottom_divergence", "mfi_14", False, 1),
+        ("obv_bottom_divergence", "obv", False, 1),
+    ),
+)
+def test_indicator_divergence_requires_price_and_trend_confirmation(
+    signal_id: str,
+    feature_key: str,
+    find_high: bool,
+    direction: int,
+):
+    closes = (
+        [200.0 - value for value in _bottom_prices()]
+        if find_high else _bottom_prices()
+    )
+    closes[-1] = 91.0 if find_high else 109.0
+    indicator = [50.0] * len(closes)
+    indicator[8] = 80.0 if find_high else 20.0
+    indicator[23] = 70.0 if find_high else 30.0
+    values = [{feature_key: value} for value in indicator]
+    values[-1].update({
+        "price_to_ma_20": 0.9 if find_high else 1.1,
+        "momentum_20": -1.0 if find_high else 1.0,
+    })
+
+    result = RULES[signal_id].evaluate(_context(values, closes))
+
+    assert result.active
+    assert result.direction == direction
+    assert "尚未" not in result.description
 
 
 @pytest.mark.parametrize(

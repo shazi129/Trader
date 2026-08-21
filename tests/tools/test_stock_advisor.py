@@ -76,14 +76,30 @@ def test_report_groups_active_bullish_and_bearish_signals():
                 0,
             ),
         ],
-        horizons={20: HorizonAnalysis(20, 0.60, 0.40, 0.1, 2)},
+        horizons={20: HorizonAnalysis(20, 0.60, 0.40, 0.1, 2, 0.5)},
     )
     artifact = BacktestArtifact(
         universe=("Example",),
         data_cutoff="2025-01-01",
+        baselines={"Example": {"20": 0.5}},
+        pooled_baselines={"20": 0.5},
         metrics={
-            "bull": {"20": SignalMetric(1_000_000, 600_000, 0.6, 0.4)},
-            "bear": {"20": SignalMetric(1_000_000, 400_000, 0.4, 0.6)},
+            "bull": {"20": SignalMetric(
+                1_000_000, 600_000, 0.6, 0.4,
+                baseline_success_rate=0.5,
+                excess_success_rate=0.1,
+                direction_multiplier=1,
+            )},
+            "bear": {"20": SignalMetric(
+                1_000_000, 400_000, 0.4, 0.6,
+                baseline_success_rate=0.5,
+                excess_success_rate=-0.1,
+                direction_multiplier=-1,
+                oos_samples=10_000,
+                oos_excess_success_rate=0.1,
+                oos_positive_folds=3,
+                oos_total_folds=3,
+            )},
         },
     )
     forecast = MultiHorizonForecast(
@@ -125,7 +141,9 @@ def test_report_groups_active_bullish_and_bearish_signals():
     assert "| MACD死叉 | `crossover` | DIF向下穿越DEA |" in markdown
     assert "### 3.3 回测后的有效方向与概率贡献" in markdown
     assert "**有效看多（反向）**" in markdown
-    assert "最终上涨概率 = `Σ(有效上涨概率 × 有效权重) / Σ有效权重`" in markdown
+    assert "只有单侧 95% 显著优于基准时才获得权重" in markdown
+    assert "命中率低于基准不会自动反转" in markdown
+    assert "60.0% / 50.0%" in markdown
     assert "因此上涨概率为 **60.0%**" in markdown
     assert "### 1.1 综合概率（可靠性加权融合）" in markdown
     assert "| [-] 20日 | **40.0%** | 60.0% | 偏空" in markdown

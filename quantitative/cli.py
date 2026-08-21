@@ -70,12 +70,15 @@ def _render_backtest_results(
     horizons = tuple(sorted(artifact.horizons))
     lines = [
         "",
-        "形态回测结果（成功率表示按该形态方向判断正确）",
+        "形态回测结果（背离按事件去重；成功率与个股周期基准比较）",
         f"模型: {artifact.model_version} | 截止日: {artifact.data_cutoff or '-'} "
         f"| 标的数: {len(artifact.universe)}",
         "",
         "| 形态 | "
-        + " | ".join(f"{h}日：成功率 / 样本 / 权重" for h in horizons)
+        + " | ".join(
+            f"{h}日：成功率 / 基准 / 样本 / 方向 / 权重"
+            for h in horizons
+        )
         + " |",
         "|---|" + "---|" * len(horizons),
     ]
@@ -86,9 +89,15 @@ def _render_backtest_results(
             if metric is None or metric.samples == 0:
                 cells.append("无样本")
             else:
+                direction = {
+                    1: "名义",
+                    -1: "样本外反向",
+                    0: "禁用",
+                }[metric.direction_multiplier]
                 cells.append(
-                    f"{metric.success_rate:.1%} / {metric.samples} / "
-                    f"{metric.weight:.3f}"
+                    f"{metric.success_rate:.1%} / "
+                    f"{metric.baseline_success_rate:.1%} / "
+                    f"{metric.samples} / {direction} / {metric.weight:.3f}"
                 )
         label = signal_names.get(signal_id, signal_id)
         lines.append(f"| {label} (`{signal_id}`) | " + " | ".join(cells) + " |")

@@ -73,7 +73,7 @@ class QuantitativeAnalysisService:
             data_source=getattr(self.quote_api, "SOURCE", "unknown"),
             data_days=len(ordered),
             signals=signals,
-            horizons=aggregate_signals(signals, artifact),
+            horizons=aggregate_signals(signals, artifact, symbol=symbol),
         )
         report.summary = render_summary(report)
         return report

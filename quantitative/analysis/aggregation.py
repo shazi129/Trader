@@ -1,4 +1,4 @@
-"""Aggregate active signals with point-in-time backtest statistics."""
+"""Aggregate only statistically validated signals over symbol base rates."""
 
 from __future__ import annotations
 
@@ -12,43 +12,56 @@ def signal_contributions(
     signals: list[SignalResult],
     artifact: BacktestArtifact,
     horizon: int,
+    *,
+    symbol: str | None = None,
 ) -> list[SignalContribution]:
-    """Explain each active signal using exactly the production aggregation math."""
-    prepared: list[tuple[SignalResult, float, int, float, float, float, bool]] = []
+    """Explain each validated active signal using production aggregation math."""
+    baseline_probability_up = artifact.baseline_probability_up(symbol, horizon)
+    prepared: list[
+        tuple[SignalResult, float, int, float, float, float, float, int]
+    ] = []
     denominator = 0.0
-    for signal in (item for item in signals if item.active):
+    for signal in (item for item in signals if item.active and item.direction != 0):
         metric = artifact.metric(signal.signal_id, horizon)
-        used_fallback = metric is None or metric.samples == 0
-        if used_fallback:
-            success_rate = 0.55
-            samples = 0
-            weight = 0.05
-            calibrated_success_rate = success_rate
-        else:
-            success_rate = metric.success_rate
-            samples = metric.samples
-            weight = metric.weight
-            sample_reliability = samples / (samples + 50.0)
-            calibrated_success_rate = (
-                0.5 + (success_rate - 0.5) * sample_reliability
-            )
-        if weight <= 0:
+        if (
+            metric is None
+            or metric.samples == 0
+            or metric.weight <= 0
+            or metric.direction_multiplier not in (-1, 1)
+        ):
             continue
-        probability_up = (
-            calibrated_success_rate
-            if signal.direction > 0
-            else 1.0 - calibrated_success_rate
+
+        effective_direction = signal.direction * metric.direction_multiplier
+        effective_excess = (
+            metric.excess_success_rate * metric.direction_multiplier
         )
-        effective_weight = weight * max(signal.strength, 0.0)
+        if effective_excess <= 0:
+            continue
+        baseline_effective_success = (
+            baseline_probability_up
+            if effective_direction > 0
+            else 1.0 - baseline_probability_up
+        )
+        effective_success = max(
+            0.05,
+            min(0.95, baseline_effective_success + effective_excess),
+        )
+        probability_up = (
+            effective_success
+            if effective_direction > 0
+            else 1.0 - effective_success
+        )
+        effective_weight = metric.weight * max(signal.strength, 0.0)
         denominator += effective_weight
         prepared.append((
             signal,
-            success_rate,
-            samples,
-            weight,
+            metric.success_rate,
+            metric.samples,
+            metric.weight,
+            metric.baseline_success_rate,
+            effective_excess,
             probability_up,
-            effective_weight,
-            used_fallback,
+            effective_direction,
         ))
 
     result: list[SignalContribution] = []
@@ -57,10 +70,12 @@ def signal_contributions(
         success_rate,
         samples,
         weight,
+        baseline_success_rate,
+        effective_excess,
         probability_up,
-        effective_weight,
-        used_fallback,
+        effective_direction,
     ) in prepared:
+        effective_weight = weight * max(signal.strength, 0.0)
         weight_share = effective_weight / denominator if denominator else 0.0
         result.append(SignalContribution(
             signal_id=signal.signal_id,
@@ -73,8 +88,12 @@ def signal_contributions(
             effective_probability_up=probability_up,
             effective_weight=effective_weight,
             weight_share=weight_share,
-            probability_point_contribution=(probability_up - 0.5) * weight_share,
-            used_fallback=used_fallback,
+            probability_point_contribution=(
+                probability_up - baseline_probability_up
+            ) * weight_share,
+            baseline_success_rate=baseline_success_rate,
+            excess_success_rate=effective_excess,
+            effective_direction=effective_direction,
         ))
     return result
 
@@ -83,17 +102,27 @@ def aggregate_signals(
     signals: list[SignalResult],
     artifact: BacktestArtifact,
     horizons: tuple[int, ...] = HORIZONS,
+    *,
+    symbol: str | None = None,
 ) -> dict[int, HorizonAnalysis]:
     result: dict[int, HorizonAnalysis] = {}
     for horizon in horizons:
-        contributions = signal_contributions(signals, artifact, horizon)
+        baseline_probability_up = artifact.baseline_probability_up(symbol, horizon)
+        contributions = signal_contributions(
+            signals,
+            artifact,
+            horizon,
+            symbol=symbol,
+        )
         denominator = sum(item.effective_weight for item in contributions)
         numerator = sum(
             item.effective_probability_up * item.effective_weight
             for item in contributions
         )
         contributors = len(contributions)
-        probability_up = numerator / denominator if denominator else 0.5
+        probability_up = (
+            numerator / denominator if denominator else baseline_probability_up
+        )
         probability_up = max(0.05, min(0.95, probability_up))
         confidence = min(1.0, denominator / max(contributors, 1))
         result[horizon] = HorizonAnalysis(
@@ -102,6 +131,7 @@ def aggregate_signals(
             probability_down=round(1.0 - probability_up, 4),
             confidence=round(confidence, 4),
             contributing_signals=contributors,
+            baseline_probability_up=round(baseline_probability_up, 4),
         )
     return result
 

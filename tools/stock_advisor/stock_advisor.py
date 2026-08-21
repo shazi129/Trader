@@ -260,17 +260,16 @@ def _render_directional_signals(
 
     universe = "、".join(artifact.universe) if artifact.universe else "未记录"
     out.extend([
-        "> **形态数量不是投票数。** 历史命中率先按样本量向 50% 收缩；"
-        "看多形态的有效上涨概率等于收缩后命中率，看空形态则等于"
-        "`1 - 收缩后看空命中率`。如果名义形态的命中率低于 50%，"
-        "它会成为反向指标。",
+        "> **形态数量不是投票数。** 背离按独立事件去重；每个信号的命中率"
+        "与对应股票、对应周期的无条件基准比较，只有单侧 95% 显著优于"
+        "基准时才获得权重。",
         "",
-        "> 最终上涨概率 = `Σ(有效上涨概率 × 有效权重) / Σ有效权重`；"
-        "下表的“概率贡献”表示该形态相对 50% 中性基准贡献了多少个百分点，"
-        "所有贡献之和等于该周期上涨概率减去 50%。",
+        "> 命中率低于基准不会自动反转。只有扩展窗口训练后，在至少两个后续"
+        "走步样本外区间保持正向且合并结果显著的反向关系，才允许标记为"
+        "反向指标；否则权重为 0。",
         "",
-        "> 样本收缩公式：`收缩后命中率 = 50% + (历史命中率 - 50%) × "
-        "样本数 / (样本数 + 50)`，用于防止小样本的极端命中率主导结果。",
+        "> 最终上涨概率是已验证信号概率的加权平均；没有有效信号时返回该股票"
+        "对应周期的历史上涨基准。下表贡献均相对该基准计算。",
         "",
         f"> 回测模型：`{artifact.model_version}`；截止日："
         f"{artifact.data_cutoff or '未记录'}；股票池：{universe}。",
@@ -278,35 +277,40 @@ def _render_directional_signals(
     ])
 
     for horizon in sorted(report.horizons):
-        contributions = signal_contributions(report.signals, artifact, horizon)
+        contributions = signal_contributions(
+            report.signals,
+            artifact,
+            horizon,
+            symbol=report.symbol,
+        )
         out.append(f"#### {horizon}日贡献明细")
         out.append("")
         if not contributions:
-            out.append("> 没有带有效权重的触发形态。")
+            baseline = report.horizons[horizon].baseline_probability_up
+            out.append(
+                f"> 没有通过显著性验证的触发形态，使用历史上涨基准 "
+                f"**{baseline:.1%}**。"
+            )
             out.append("")
             continue
         out.append(
-            "| 指标形态 | 名义方向 | 回测有效方向 | 历史命中率 | 样本数 "
-            "| 有效上涨概率 | 模型权重 | 权重占比 | 概率贡献 |"
+            "| 指标形态 | 名义方向 | 回测有效方向 | 命中率 / 基准 | 超额命中 "
+            "| 样本数 | 有效上涨概率 | 模型权重 | 权重占比 | 概率贡献 |"
         )
         out.append(
-            "|----------|----------|--------------|------------|--------:"
-            "|--------------:|---------:|---------:|---------:|"
+            "|----------|----------|--------------|---------------|----------:"
+            "|--------:|--------------:|---------:|---------:|---------:|"
         )
         for item in contributions:
             effective = item.effective_direction_text
             if item.is_reversed:
                 effective += "（反向）"
-            success = (
-                "默认55.0%*"
-                if item.used_fallback
-                else f"{item.success_rate:.1%}"
-            )
             out.append(
                 f"| {_markdown_cell(item.name)} "
                 f"| {item.nominal_direction_text} "
                 f"| **{effective}** "
-                f"| {success} "
+                f"| {item.success_rate:.1%} / {item.baseline_success_rate:.1%} "
+                f"| {item.excess_success_rate:+.1%} "
                 f"| {item.samples} "
                 f"| {item.effective_probability_up:.1%} "
                 f"| {item.backtest_weight:.3f} "
@@ -316,16 +320,13 @@ def _render_directional_signals(
         out.append("")
         horizon_result = report.horizons[horizon]
         out.append(
-            f"> 本周期贡献合计："
-            f"{(horizon_result.probability_up - 0.5) * 100:+.2f} 个百分点，"
+            f"> 本周期历史上涨基准为 "
+            f"**{horizon_result.baseline_probability_up:.1%}**；"
+            f"信号调整后变化 "
+            f"{(horizon_result.probability_up - horizon_result.baseline_probability_up) * 100:+.2f} 个百分点，"
             f"因此上涨概率为 **{horizon_result.probability_up:.1%}**。"
         )
         out.append("")
-        if any(item.used_fallback for item in contributions):
-            out.append(
-                "> \\* 无历史样本的形态使用 55% 成功率、0.05 权重的默认值。"
-            )
-            out.append("")
     return out
 
 

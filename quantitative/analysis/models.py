@@ -14,6 +14,7 @@ class HorizonAnalysis:
     probability_down: float
     confidence: float
     contributing_signals: int
+    baseline_probability_up: float = 0.5
 
     @property
     def trend(self) -> str:
@@ -39,6 +40,9 @@ class SignalContribution:
     effective_weight: float
     weight_share: float
     probability_point_contribution: float
+    baseline_success_rate: float = 0.5
+    excess_success_rate: float = 0.0
+    effective_direction: int = 0
     used_fallback: bool = False
 
     @property
@@ -51,23 +55,18 @@ class SignalContribution:
 
     @property
     def effective_direction_text(self) -> str:
-        if self.effective_probability_up > 0.5:
+        if self.effective_direction > 0:
             return "有效看多"
-        if self.effective_probability_up < 0.5:
+        if self.effective_direction < 0:
             return "有效看空"
         return "有效中性"
 
     @property
     def is_reversed(self) -> bool:
-        effective_direction = (
-            1 if self.effective_probability_up > 0.5
-            else -1 if self.effective_probability_up < 0.5
-            else 0
-        )
         return (
             self.nominal_direction != 0
-            and effective_direction != 0
-            and self.nominal_direction != effective_direction
+            and self.effective_direction != 0
+            and self.nominal_direction != self.effective_direction
         )
 
     def to_dict(self) -> dict:
@@ -80,8 +79,11 @@ class SignalContribution:
             "success_rate": self.success_rate,
             "samples": self.samples,
             "backtest_weight": self.backtest_weight,
+            "baseline_success_rate": self.baseline_success_rate,
+            "excess_success_rate": self.excess_success_rate,
             "effective_probability_up": self.effective_probability_up,
             "effective_direction_text": self.effective_direction_text,
+            "effective_direction": self.effective_direction,
             "effective_weight": self.effective_weight,
             "weight_share": self.weight_share,
             "probability_point_contribution": self.probability_point_contribution,
@@ -120,6 +122,7 @@ class QuantitativeReport:
                     "probability_down": result.probability_down,
                     "confidence": result.confidence,
                     "contributing_signals": result.contributing_signals,
+                    "baseline_probability_up": result.baseline_probability_up,
                     "trend": result.trend,
                 }
                 for days, result in self.horizons.items()

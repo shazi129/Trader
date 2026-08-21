@@ -63,8 +63,8 @@ active = [result for result in results if result.active]
 | `momentum_20_negative` | 20 日动量向下 | -1 | 状态 |
 | `bullish_volume_expansion` | 上涨放量 | +1 | 状态 |
 | `volatility_contraction` | 波动率收敛 | 由动量决定 | 状态 |
-| `macd_top_divergence` | MACD 顶背离 | -1 | 近期事件 |
-| `macd_bottom_divergence` | MACD 底背离 | +1 | 近期事件 |
+| `macd_top_divergence` | MACD 顶背离 | 0/-1 | 风险提示；跌破颈线且趋势转弱后确认 |
+| `macd_bottom_divergence` | MACD 底背离 | 0/+1 | 机会提示；突破颈线且趋势转强后确认 |
 | `price_double_top` | 双顶且跌破颈线 | -1 | 近期事件 |
 | `price_double_bottom` | 双底且突破颈线 | +1 | 近期事件 |
 
@@ -104,17 +104,18 @@ active = [result for result in results if result.active]
 | `cci_20_overbought_exit` | CCI 离开超买区 | -1 | CCI 向下穿越 +100 |
 | `williams_r_14_oversold_exit` | Williams %R 离开超卖区 | +1 | 向上穿越 -80 |
 | `williams_r_14_overbought_exit` | Williams %R 离开超买区 | -1 | 向下穿越 -20 |
-| `rsi_top_divergence` | RSI 顶背离 | -1 | 近期价格高点抬高、RSI 高点降低 |
-| `rsi_bottom_divergence` | RSI 底背离 | +1 | 近期价格低点降低、RSI 低点抬高 |
-| `mfi_top_divergence` | MFI 顶背离 | -1 | 近期价格高点抬高、MFI 高点降低 |
-| `mfi_bottom_divergence` | MFI 底背离 | +1 | 近期价格低点降低、MFI 低点抬高 |
-| `obv_top_divergence` | OBV 顶背离 | -1 | 近期价格高点抬高、OBV 高点降低 |
-| `obv_bottom_divergence` | OBV 底背离 | +1 | 近期价格低点降低、OBV 低点抬高 |
+| `rsi_top_divergence` | RSI 顶背离 | 0/-1 | 背离先作风险提示；跌破颈线、低于MA20且20日动量转负后看空 |
+| `rsi_bottom_divergence` | RSI 底背离 | 0/+1 | 背离先作机会提示；突破颈线、高于MA20且20日动量转正后看多 |
+| `mfi_top_divergence` | MFI 顶背离 | 0/-1 | 与 RSI 顶背离使用相同价格和趋势确认 |
+| `mfi_bottom_divergence` | MFI 底背离 | 0/+1 | 与 RSI 底背离使用相同价格和趋势确认 |
+| `obv_top_divergence` | OBV 顶背离 | 0/-1 | 与 RSI 顶背离使用相同价格和趋势确认 |
+| `obv_bottom_divergence` | OBV 底背离 | 0/+1 | 与 RSI 底背离使用相同价格和趋势确认 |
 | `bearish_price_volume_divergence` | 价涨量缩 | -1 | 5 日动量为正且当日量比低于 0.8 |
 | `bearish_volume_expansion` | 下跌放量 | -1 | 5 日动量为负且当日量比高于 1.2 |
 
-形态的名义方向只是先验解释。最终分析会结合回测成功率；若某个名义看多形态长期
-低于 50% 命中率，聚合器会把它视为经验上的反向证据。
+形态的名义方向只是先验解释。最终分析会把回测命中率与各标的、各周期基础方向率
+比较；没有显著超额的形态不进入聚合。样本内表现差不会自动反转，反向关系只有通过
+扩展窗口走步样本外验证后才可进入生产统计。
 
 ## 显式注册表
 
@@ -171,7 +172,10 @@ class StrongTrend(SignalRule):
 - 金叉/死叉只在穿越发生当天触发；
 - 离开超买超卖区、零轴穿越、带外回归也只在发生当天触发；
 - 均线排列、超买超卖可以连续多日触发；
-- 背离和双顶双底使用近期约束，避免一个旧形态无限期保持 active；
+- 背离先以 `active=True, direction=0` 表示风险/机会提示；只有同时完成颈线突破和
+  MA20、20日动量趋势确认后才给出方向；
+- 回测层对确认后的背离按 `inactive/中性 → 有方向` 的事件边沿去重，不把连续确认日
+  重复计为独立样本；
 - 双顶需要跌破颈线，双底需要突破颈线，不只是两个价格接近的极值。
 
 布林带收口突破至少需要 20 个可比较的历史带宽值。DMI 交叉必须同时通过

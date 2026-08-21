@@ -76,7 +76,7 @@ except ImportError:  # 直接运行 web_api.py 时（非 -m）
 # 逐日多空强度
 # ===========================================================================
 
-def _compute_daily_strength(quotes: list[DailyQuote], days: int
+def _compute_daily_strength(name_key: str, quotes: list[DailyQuote], days: int
                             ) -> list[dict]:
     """对最近 ``days`` 个交易日，逐日计算多空强度。
 
@@ -96,9 +96,14 @@ def _compute_daily_strength(quotes: list[DailyQuote], days: int
         return []
 
     calculator = FeatureCalculator()
-    features = calculator.compute("series", quotes)
+    features = calculator.compute(name_key, quotes)
     engine = SignalEngine()
     artifact = BacktestArtifactRepository().load()
+    period_horizons = {"short": 5, "medium": 20, "long": 60}
+    period_baseline_up = {
+        period: round(artifact.baseline_probability_up(name_key, horizon), 4)
+        for period, horizon in period_horizons.items()
+    }
     start = max(0, n - days)
     out: list[dict] = []
     for i in range(start, n):
@@ -106,9 +111,9 @@ def _compute_daily_strength(quotes: list[DailyQuote], days: int
         window = quotes[: i + 1]
         try:
             feature_window = features[:i + 1]
-            context = SignalContext("series", window, feature_window)
+            context = SignalContext(name_key, window, feature_window)
             signals = engine.evaluate(context)
-            horizons = aggregate_signals(signals, artifact)
+            horizons = aggregate_signals(signals, artifact, symbol=name_key)
             primary = horizons[20]
             prob_up = primary.probability_up
             prob_down = primary.probability_down
@@ -120,11 +125,26 @@ def _compute_daily_strength(quotes: list[DailyQuote], days: int
                 "medium": round(horizons[20].probability_up * 2 - 1, 4),
                 "long": round(horizons[60].probability_up * 2 - 1, 4),
             }
+            period_probability_up = {
+                period: round(horizons[horizon].probability_up, 4)
+                for period, horizon in period_horizons.items()
+            }
+            period_signal_edge = {
+                period: round(
+                    period_probability_up[period] - period_baseline_up[period],
+                    4,
+                )
+                for period in period_horizons
+            }
         except Exception:  # noqa: BLE001
             # 早期窗口特征不足等异常，强度记为 0（中性）
             prob_up, prob_down, trend = 0.5, 0.5, "数据不足"
             strength = 0.0
             period_net = {"short": 0.0, "medium": 0.0, "long": 0.0}
+            period_probability_up = dict(period_baseline_up)
+            period_signal_edge = {
+                "short": 0.0, "medium": 0.0, "long": 0.0,
+            }
 
         out.append({
             "date": q.date,
@@ -138,6 +158,10 @@ def _compute_daily_strength(quotes: list[DailyQuote], days: int
             "strength": round(strength, 4),
             # 分周期净强度（短/中/长），供前端渲染三根红绿柱
             "period_net": period_net,
+            # 分周期绝对概率、个股历史基准和已验证信号相对基准的增量。
+            "period_probability_up": period_probability_up,
+            "period_baseline_up": period_baseline_up,
+            "period_signal_edge": period_signal_edge,
             "trend": trend,
         })
     return out
@@ -158,7 +182,7 @@ def _cmd_trend(name_key: str, days: int, db_path: Optional[str]) -> dict:
             "error": f"数据库无 {name_key} 的 K 线数据，请先运行 kline_fetcher",
         }
 
-    series = _compute_daily_strength(quotes, days)
+    series = _compute_daily_strength(name_key, quotes, days)
     return {
         "ok": True,
         "name_key": name_key,

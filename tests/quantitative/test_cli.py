@@ -30,8 +30,18 @@ def test_backtest_result_render_includes_rate_samples_and_weight():
         data_cutoff="2026-08-20",
         metrics={
             "test_signal": {
-                "5": SignalMetric(100, 60, 0.6, 0.25),
-                "20": SignalMetric(80, 44, 0.55, 0.1),
+                "5": SignalMetric(
+                    100, 60, 0.6, 0.25,
+                    baseline_success_rate=0.5,
+                    excess_success_rate=0.1,
+                    direction_multiplier=1,
+                ),
+                "20": SignalMetric(
+                    80, 44, 0.55, 0.1,
+                    baseline_success_rate=0.48,
+                    excess_success_rate=0.07,
+                    direction_multiplier=1,
+                ),
             }
         },
     )
@@ -39,6 +49,6 @@ def test_backtest_result_render_includes_rate_samples_and_weight():
     output = _render_backtest_results(artifact, {"test_signal": "测试形态"})
 
     assert "测试形态 (`test_signal`)" in output
-    assert "60.0% / 100 / 0.250" in output
-    assert "55.0% / 80 / 0.100" in output
+    assert "60.0% / 50.0% / 100 / 名义 / 0.250" in output
+    assert "55.0% / 48.0% / 80 / 名义 / 0.100" in output
     assert "截止日: 2026-08-20" in output

@@ -11,7 +11,7 @@ quantitative
 ├─ indicators             纯数学指标算法
 ├─ features               从 K 线计算并物化特征
 ├─ signals                金叉、背离、超买超卖等形态
-├─ backtesting            形态的成功率、样本量与权重
+├─ backtesting            事件去重、个股基准、显著性与样本外验证权重
 └─ analysis               某标的某时点的统一量化分析
 financial_reports         财报解析、仓储与 PIT 基本面分析
 infrastructure            通用 SQLite 连接和 SQL 能力
@@ -55,7 +55,7 @@ DailyQuote
 - indicator：SMA、RSI、MACD 等纯算法；
 - feature：某标的某日的指标数值；
 - signal：金叉、背离等已触发或未触发的形态；
-- metric：某形态在历史上的成功率、样本量和权重；
+- metric：某形态相对个股周期基准的成功率、事件样本量、验证方向和权重；
 - analysis：当前时点的多周期概率和解释。
 
 特征清单的唯一来源是 `quantitative/features/catalog.py`。新增特征时无需再维护
@@ -94,7 +94,8 @@ python -m quantitative.cli analyze Tencent --date 2026-08-20
 的形态统计写入版本化的
 `quantitative/backtesting/signal_statistics.json`。未生成统计时，分析服务会使用
 低置信度的中性先验，不会把未经回测的规则伪装成可靠概率。
-控制台会同时按形态输出 5、20、60 日的方向成功率、样本量和权重。
+控制台会同时按形态输出 5、20、60 日的方向成功率、匹配基准、事件样本量、验证
+方向和权重。
 
 生成综合 Markdown 报告：
 

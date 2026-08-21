@@ -25,7 +25,7 @@ def _indicator_divergence(
     feature_key: str,
     *,
     find_high: bool,
-) -> tuple[bool, float] | None:
+) -> tuple[bool, float, int, int] | None:
     closes = [float(quote.close) for quote in context.quotes]
     indicator = context.feature_series(feature_key)
     points = _extrema(closes, 5, find_high)
@@ -48,7 +48,40 @@ def _indicator_divergence(
         and price_diverges
         and indicator_diverges
     )
-    return active, float(indicator[second]) - float(indicator[first])
+    return (
+        active,
+        float(indicator[second]) - float(indicator[first]),
+        first,
+        second,
+    )
+
+
+def _divergence_confirmation(
+    context: SignalContext,
+    first: int,
+    second: int,
+    *,
+    find_high: bool,
+) -> tuple[bool, str]:
+    """Require a neckline break and MA20/momentum trend confirmation."""
+    closes = [float(quote.close) for quote in context.quotes]
+    latest = closes[-1]
+    between = closes[first:second + 1]
+    price_to_ma_20 = context.latest.get("price_to_ma_20")
+    momentum_20 = context.latest.get("momentum_20")
+    if price_to_ma_20 is None or momentum_20 is None:
+        return False, "趋势确认特征不足"
+    if find_high:
+        neckline = min(between)
+        price_confirmed = latest < neckline
+        trend_confirmed = price_to_ma_20 < 1.0 and momentum_20 < 0
+        label = "跌破颈线且收盘低于MA20、20日动量转负"
+    else:
+        neckline = max(between)
+        price_confirmed = latest > neckline
+        trend_confirmed = price_to_ma_20 > 1.0 and momentum_20 > 0
+        label = "突破颈线且收盘高于MA20、20日动量转正"
+    return price_confirmed and trend_confirmed, label
 
 
 class _IndicatorDivergence(SignalRule):
@@ -64,69 +97,52 @@ class _IndicatorDivergence(SignalRule):
         )
         if result is None:
             return self.result(False, 0, description="有效价格极值点不足")
-        active, value = result
+        active, value, first, second = result
         if self.find_high:
             active_description = f"价格创新高但{self.indicator_name}降低"
             inactive_description = f"未出现{self.indicator_name}顶背离"
         else:
             active_description = f"价格创新低但{self.indicator_name}抬高"
             inactive_description = f"未出现{self.indicator_name}底背离"
+        if not active:
+            return self.result(False, 0, value=value,
+                               description=inactive_description)
+        confirmed, confirmation = _divergence_confirmation(
+            context,
+            first,
+            second,
+            find_high=self.find_high,
+        )
+        description = (
+            f"{active_description}；{confirmation}"
+            if confirmed
+            else f"风险提示：{active_description}；尚未得到价格与趋势确认"
+        )
         return self.result(
-            active,
-            -1 if self.find_high else 1,
+            True,
+            (-1 if self.find_high else 1) if confirmed else 0,
             value=value,
-            description=active_description if active else inactive_description,
+            description=description,
         )
 
 
-class MACDTopDivergence(SignalRule):
+class MACDTopDivergence(_IndicatorDivergence):
     signal_id = "macd_top_divergence"
     name = "MACD顶背离"
     category = "divergence"
 
-    def evaluate(self, context: SignalContext):
-        closes = [float(quote.close) for quote in context.quotes]
-        dif = context.feature_series("macd_dif")
-        points = _extrema(closes, 5, True)
-        points = [index for index in points if dif[index] is not None]
-        if len(points) < 2:
-            return self.result(False, 0, description="有效高点不足")
-        first, second = points[-2:]
-        active = (
-            _is_recent(second, len(closes))
-            and closes[second] > closes[first]
-            and dif[second] < dif[first]
-        )
-        value = float(dif[second] - dif[first])
-        return self.result(
-            active, -1, value=value,
-            description="价格创新高但DIF降低" if active else "未出现顶背离",
-        )
+    feature_key = "macd_dif"
+    indicator_name = "DIF"
+    find_high = True
 
 
-class MACDBottomDivergence(SignalRule):
+class MACDBottomDivergence(_IndicatorDivergence):
     signal_id = "macd_bottom_divergence"
     name = "MACD底背离"
     category = "divergence"
 
-    def evaluate(self, context: SignalContext):
-        closes = [float(quote.close) for quote in context.quotes]
-        dif = context.feature_series("macd_dif")
-        points = _extrema(closes, 5, False)
-        points = [index for index in points if dif[index] is not None]
-        if len(points) < 2:
-            return self.result(False, 0, description="有效低点不足")
-        first, second = points[-2:]
-        active = (
-            _is_recent(second, len(closes))
-            and closes[second] < closes[first]
-            and dif[second] > dif[first]
-        )
-        value = float(dif[second] - dif[first])
-        return self.result(
-            active, 1, value=value,
-            description="价格创新低但DIF抬高" if active else "未出现底背离",
-        )
+    feature_key = "macd_dif"
+    indicator_name = "DIF"
 
 
 class RSITopDivergence(_IndicatorDivergence):
