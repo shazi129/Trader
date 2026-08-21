@@ -10,7 +10,7 @@
 
 流程：
 1. 从行情仓储读取 K 线，从量化仓储读取特征快照
-2. 若 K 线为空或特征落后，统一重新物化特征
+2. 若特征缺失或落后，仅使用本地 K 线重新物化；K 线为空则失败
 3. 用形态信号和回测统计生成多周期概率
 4. 用 ``HorizonBacktester`` 跑历史相似态匹配，得 5/20/60 日上涨概率
 5. 把上述结果合成一份 markdown，控制台打印 + 落盘到 reports/
@@ -34,6 +34,7 @@ if str(_ROOT) not in sys.path:
 import config  # noqa: E402
 from financial_reports.repository import FinancialReportRepository  # noqa: E402
 from financial_reports.analysis import FundamentalSnapshot, build_snapshot  # noqa: E402
+from quote_api.db_api import DbQuoteAPI  # noqa: E402
 from quote_api.repository import MarketDataRepository  # noqa: E402
 from quantitative.analysis import (  # noqa: E402
     QuantitativeAnalysisService,
@@ -48,7 +49,6 @@ from quantitative.features import (  # noqa: E402
     FeatureSnapshot,
     materialize_symbol,
 )
-from quote_api import QuoteAPIFactory  # noqa: E402
 from quote_api.quote_base import DailyQuote  # noqa: E402
 from utils.logger import get_logger  # noqa: E402
 
@@ -72,41 +72,45 @@ DEFAULT_REPORT_DIR = _THIS_DIR / "reports"
 
 
 # ===========================================================================
-# 数据加载（"没读到就算"的核心）
+# 数据加载（本地行情 + 按需物化特征）
 # ===========================================================================
 
-def _load_or_build(name_key: str, api: str, db_path: Optional[str],
-                   force_refresh: bool = False
+def _load_or_build(name_key: str, db_path: Optional[str],
+                   rebuild_features: bool = False
                    ) -> tuple[list[DailyQuote], list[FeatureSnapshot]]:
-    """读仓储；若 K 线为空 / 特征快照落后于 K 线 → 重算后再读。
+    """只读本地行情；特征缺失或落后时基于本地 K 线重建。
 
-    判定策略（用户需求 ②A）：
+    判定策略：
     - K 线最新日期 == 特征最新日期 → 直接读仓储
-    - 否则 → 重新物化完整特征序列
-    - ``force_refresh=True`` 强制重算（绕过缓存）
+    - 特征缺失或落后 → 使用 ``source="db"`` 重新物化完整特征序列
+    - K 线为空 → 直接失败，绝不访问线上 provider
+    - ``rebuild_features=True`` 强制用本地 K 线重建特征
     """
     with closing(MarketDataRepository(db_path)) as market_repository:
         kline_latest = market_repository.latest_date(name_key)
     with closing(FeatureRepository(db_path)) as feature_repository:
         feature_latest = feature_repository.latest_date(name_key)
 
-    need_recompute = (
-        force_refresh
-        or kline_latest is None
-        or feature_latest != kline_latest
-    )
+    if kline_latest is None:
+        _log.error(
+            "[%s] 本地数据库没有 K 线；请先运行 kline_fetcher 更新行情",
+            name_key,
+        )
+        return [], []
+
+    need_recompute = rebuild_features or feature_latest != kline_latest
 
     if need_recompute:
         reason = (
-            "强制刷新"
-            if force_refresh
-            else ("DB 无该股票数据" if kline_latest is None
-                  else f"特征(latest={feature_latest}) ≠ K线(latest={kline_latest})")
+            "强制重建本地特征"
+            if rebuild_features
+            else f"特征(latest={feature_latest}) ≠ K线(latest={kline_latest})"
         )
         _log.info("[%s] 触发重算: %s", name_key, reason)
         count = materialize_symbol(
-            name_key, source=api, db_path=db_path,
-            force_refresh=force_refresh,
+            name_key,
+            source="db",
+            db_path=db_path,
         )
         if not count:
             _log.error("[%s] 重算失败", name_key)
@@ -574,25 +578,26 @@ def _build_price_map(quotes: list[DailyQuote],
 # 主流程
 # ===========================================================================
 
-def analyze_stock(name_key: str, *, api: Optional[str] = None,
-                  db_path: Optional[str] = None,
+def analyze_stock(name_key: str, *, db_path: Optional[str] = None,
                   top_k: int = 50,
                   write_report: bool = True,
                   report_dir: Optional[Path] = None,
-                  force_refresh: bool = False) -> Optional[Path]:
+                  rebuild_features: bool = False) -> Optional[Path]:
     """对指定股票出预测报告。
 
     :return: 报告文件路径（write_report=True 时），否则 None
     """
-    api = api or QuoteAPIFactory.current_source()
     stock_info = config.global_stock_list.get(name_key)
     if stock_info is None:
         _log.error("[%s] 未在 config.global_stock_list 中登记", name_key)
         return None
 
     # 1. 读 / 算 数据
-    quotes, features = _load_or_build(name_key, api, db_path,
-                                      force_refresh=force_refresh)
+    quotes, features = _load_or_build(
+        name_key,
+        db_path,
+        rebuild_features=rebuild_features,
+    )
     if not quotes:
         _log.error("[%s] 无法获取行情数据", name_key)
         return None
@@ -601,9 +606,12 @@ def analyze_stock(name_key: str, *, api: Optional[str] = None,
         return None
 
     # 2. 统一量化服务：特征 → 形态 → 回测权重 → 多周期概率
-    quote_impl = QuoteAPIFactory.create(api)
-    service = QuantitativeAnalysisService(quote_impl)
-    report = service.analyze_quotes(name_key, quotes)
+    quote_impl = DbQuoteAPI(db_path=db_path)
+    try:
+        service = QuantitativeAnalysisService(quote_impl)
+        report = service.analyze_quotes(name_key, quotes)
+    finally:
+        quote_impl.close()
     if report is None:
         _log.error("[%s] 量化分析失败", name_key)
         return None
@@ -684,25 +692,17 @@ def _rebuild_signal_statistics(db_path: Optional[str] = None) -> bool:
 # ===========================================================================
 
 def main() -> int:
-    current_api = QuoteAPIFactory.current_source()
-    available_apis = QuoteAPIFactory.available_sources()
     parser = argparse.ArgumentParser(
         description="股票综合分析工具：行情/形态信号/历史相似态预测",
     )
     parser.add_argument("stock", help="股票 name_key (如 Tencent)")
-    parser.add_argument(
-        "--api",
-        choices=available_apis,
-        default=current_api,
-        help="数据源（缺数据时回源用，default: %(default)s）",
-    )
     parser.add_argument("--db", help="数据库路径（不指定走默认）")
     parser.add_argument("--top-k", type=int, default=50,
                         help="历史相似日数量，default: 50")
     parser.add_argument("--no-write", action="store_true",
                         help="不落盘 markdown，仅控制台输出")
-    parser.add_argument("--force-refresh", action="store_true",
-                        help="强制从 API 重新拉取行情并物化特征")
+    parser.add_argument("--rebuild-features", action="store_true",
+                        help="仅使用本地 K 线强制重建量化特征")
     parser.add_argument("--rebuild-signal-stats", action="store_true",
                         help="重新回测形态成功率、样本量和权重后再出报告")
     parser.add_argument("--report-dir", help="自定义报告目录")
@@ -714,18 +714,14 @@ def main() -> int:
         _rebuild_signal_statistics(args.db)
         print("\n形态回测统计已重建，继续出报告……\n")
 
-    try:
-        path = analyze_stock(
-            args.stock,
-            api=args.api,
-            db_path=args.db,
-            top_k=args.top_k,
-            write_report=not args.no_write,
-            report_dir=report_dir,
-            force_refresh=args.force_refresh,
-        )
-    finally:
-        QuoteAPIFactory.clear_cache()
+    path = analyze_stock(
+        args.stock,
+        db_path=args.db,
+        top_k=args.top_k,
+        write_report=not args.no_write,
+        report_dir=report_dir,
+        rebuild_features=args.rebuild_features,
+    )
 
     return 0 if path is not None or args.no_write else 1
 

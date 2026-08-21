@@ -28,6 +28,16 @@ tools                     CLI、桌面和 Web 适配器
 详细的依赖规则和数据流见 [架构文档](docs/architecture.md)，表结构见
 [数据文档](docs/data_schema.md)。
 
+各模块使用手册：
+
+- [行情 API](docs/modules/quote_api.md)
+- [量化特征](docs/modules/quantitative_features.md)
+- [形态信号](docs/modules/quantitative_signals.md)
+- [形态回测](docs/modules/quantitative_backtesting.md)
+- [时点分析](docs/modules/quantitative_analysis.md)
+- [财报与基本面](docs/modules/financial_reports.md)
+- [SQLite 基础设施](docs/modules/infrastructure.md)
+
 ## 从基础 K 线到分析结果
 
 ```text
@@ -73,14 +83,18 @@ python tools/kline_fetcher/kline_fetcher.py run
 
 ```powershell
 python -m quantitative.cli features Tencent --api futu
+python -m quantitative.cli backtest
 python -m quantitative.cli backtest --stocks Tencent,Alibaba
 python -m quantitative.cli analyze Tencent
 python -m quantitative.cli analyze Tencent --date 2026-08-20
 ```
 
-回测命令会把标的池、数据截止日及 5、20、60 日的形态统计写入版本化的
+`backtest` 不传 `--stocks` 时会回测 `STOCK_META` 中全部具备足够本地 K 线的
+标的；传入时只回测指定标的。命令会把实际标的池、数据截止日及 5、20、60 日
+的形态统计写入版本化的
 `quantitative/backtesting/signal_statistics.json`。未生成统计时，分析服务会使用
 低置信度的中性先验，不会把未经回测的规则伪装成可靠概率。
+控制台会同时按形态输出 5、20、60 日的方向成功率、样本量和权重。
 
 生成综合 Markdown 报告：
 
@@ -88,6 +102,9 @@ python -m quantitative.cli analyze Tencent --date 2026-08-20
 python -m tools.stock_advisor.stock_advisor Tencent
 python -m tools.stock_advisor.stock_advisor Tencent --rebuild-signal-stats
 ```
+
+`stock_advisor` 严格使用本地数据库，不会在生成报告时连接线上行情源。特征缺失时
+只基于本地 K 线重建；行情更新由 `kline_fetcher` 独立负责。
 
 其它工具：
 

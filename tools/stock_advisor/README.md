@@ -22,16 +22,18 @@
 python -m tools.stock_advisor.stock_advisor Tencent
 python -m tools.stock_advisor.stock_advisor Alibaba --top-k 80
 python -m tools.stock_advisor.stock_advisor Tencent --no-write
-python -m tools.stock_advisor.stock_advisor Tencent --force-refresh
+python -m tools.stock_advisor.stock_advisor Tencent --rebuild-features
 python -m tools.stock_advisor.stock_advisor Tencent --rebuild-signal-stats
 python -m tools.stock_advisor.stock_advisor Tencent --db path/to/trader.db
 ```
 
-- `--force-refresh`：重新从线上 provider 拉取行情并物化特征；
+- `--rebuild-features`：只使用本地 K 线强制重建量化特征；
 - `--rebuild-signal-stats`：先对股票池回测全部形态，重建成功率、样本量和权重；
 - `--no-write`：只打印，不保存 Markdown；
-- `--report-dir`：指定报告目录；
-- `--api`：选择缺失行情的线上来源。
+- `--report-dir`：指定报告目录。
+
+`stock_advisor` 是严格离线工具：不会创建 Futu/Tencent/Sina 客户端，也不会补拉
+当天行情。本地没有 K 线时会直接失败，请先单独运行 `kline_fetcher`。
 
 也可以从本目录直接执行 `python stock_advisor.py Tencent`。使用 `-m` 时必须从
 项目根目录运行，并提供完整模块名。
@@ -39,8 +41,8 @@ python -m tools.stock_advisor.stock_advisor Tencent --db path/to/trader.db
 ## 数据一致性
 
 工具分别比较 `MarketDataRepository.latest_date()` 和
-`FeatureRepository.latest_date()`。若行情为空、特征落后，或显式要求刷新，便
-调用量化域的 `materialize_symbol()`；它不会直接操作业务表。
+`FeatureRepository.latest_date()`。特征缺失或落后时，使用 `source="db"` 调用
+量化域的 `materialize_symbol()`；本地行情为空时不会回源。
 
 基本面快照由 `financial_reports.analysis.build_snapshot()` 生成，查询条件包含
 `announce_date <= 分析时点`，避免读到当时尚未公告的财报。

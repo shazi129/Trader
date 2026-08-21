@@ -136,6 +136,7 @@ QuantitativeAnalysisService.analyze(symbol, anchor_date)
 
 ```powershell
 python -m quantitative.cli features Tencent --api futu
+python -m quantitative.cli backtest                  # 全股票池
 python -m quantitative.cli backtest --stocks Tencent,Alibaba
 python -m quantitative.cli analyze Tencent --date 2026-08-20
 ```
@@ -150,6 +151,19 @@ python -m quantitative.cli analyze Tencent --date 2026-08-20
 
 - `tools/kline_fetcher`：增量拉取行情，随后触发特征物化。
 - `tools/financial_fetcher`：解析并保存财报。
-- `tools/stock_advisor`：组合量化分析、历史相似态和基本面报告。
+- `tools/stock_advisor`：只读本地行情，组合量化分析、历史相似态和基本面报告；
+  特征缺失时仅基于本地 K 线物化，不连接线上 provider。
 - `tools/stock_widget`：实时行情展示。
 - 其它工具保持独立，不直接实现领域存储。
+
+## 模块使用手册
+
+| 模块 | 文档 |
+|---|---|
+| 行情获取、缓存和行情仓储 | [quote_api](modules/quote_api.md) |
+| K 线生成量化特征 | [quantitative.features](modules/quantitative_features.md) |
+| 金叉、背离等形态判断 | [quantitative.signals](modules/quantitative_signals.md) |
+| 形态成功率与权重回测 | [quantitative.backtesting](modules/quantitative_backtesting.md) |
+| 某标的某时点分析 | [quantitative.analysis](modules/quantitative_analysis.md) |
+| 财报解析、仓储和 PIT 分析 | [financial_reports](modules/financial_reports.md) |
+| 通用 SQLite 能力 | [infrastructure](modules/infrastructure.md) |

@@ -20,8 +20,8 @@
 特征、形态与回测权重模型），只是把
 "最新一天"扩展成"截至每个交易日"的逐点快照。
 
-注意：本脚本只读数据库，不触发特征物化 / 不回源拉取数据。若 DB 中缺少
-该股票数据，返回空结果（前端应提示先物化量化特征）。
+注意：本脚本不回源拉取数据。``report`` 在特征缺失时可基于本地 K 线物化特征；
+若 DB 中缺少该股票 K 线，则返回空结果（前端应提示先运行 kline_fetcher）。
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ if str(_ROOT) not in sys.path:
 import config  # noqa: E402
 from financial_reports.repository import FinancialReportRepository  # noqa: E402
 from financial_reports.analysis import build_snapshot  # noqa: E402
-from quote_api import QuoteAPIFactory  # noqa: E402
+from quote_api.db_api import DbQuoteAPI  # noqa: E402
 from quote_api.repository import MarketDataRepository  # noqa: E402
 from quantitative.analysis import QuantitativeAnalysisService  # noqa: E402
 from quantitative.analysis.aggregation import aggregate_signals  # noqa: E402
@@ -170,8 +170,7 @@ def _cmd_trend(name_key: str, days: int, db_path: Optional[str]) -> dict:
 # 报告生成（复用 stock_advisor 内部逻辑）
 # ===========================================================================
 
-def _cmd_report(name_key: str, date: Optional[str], db_path: Optional[str],
-                api: Optional[str] = None) -> dict:
+def _cmd_report(name_key: str, date: Optional[str], db_path: Optional[str]) -> dict:
     """生成某日（默认最新）的综合分析报告，返回 Markdown 文本。
 
     复用 stock_advisor 的 ``_load_or_build`` + 评分 + ``_build_markdown``。
@@ -182,8 +181,7 @@ def _cmd_report(name_key: str, date: Optional[str], db_path: Optional[str],
     if stock_info is None:
         return {"ok": False, "error": f"未登记股票: {name_key}"}
 
-    api = api or "futu"
-    quotes, features = _load_or_build(name_key, api, db_path, force_refresh=False)
+    quotes, features = _load_or_build(name_key, db_path)
     if not quotes:
         return {"ok": False, "error": f"无法获取 {name_key} 行情数据"}
 
@@ -195,8 +193,12 @@ def _cmd_report(name_key: str, date: Optional[str], db_path: Optional[str],
             return {"ok": False, "error": f"{cutoff} 之前无有效行情"}
         features = [snapshot for snapshot in features if snapshot.date <= cutoff]
 
-    service = QuantitativeAnalysisService(QuoteAPIFactory.create(api))
-    report = service.analyze_quotes(name_key, quotes)
+    quote_impl = DbQuoteAPI(db_path=db_path)
+    try:
+        service = QuantitativeAnalysisService(quote_impl)
+        report = service.analyze_quotes(name_key, quotes)
+    finally:
+        quote_impl.close()
     if report is None:
         return {"ok": False, "error": f"无法分析 {name_key}"}
 

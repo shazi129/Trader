@@ -8,8 +8,13 @@ import sys
 from quote_api import QuoteAPIFactory
 from quote_api.cached_api import CachedQuoteAPI
 from quote_api.repository import MarketDataRepository
+from quote_api.stock_meta import all_keys
 from quantitative.analysis import QuantitativeAnalysisService
-from quantitative.backtesting import BacktestArtifactRepository, SignalBacktester
+from quantitative.backtesting import (
+    BacktestArtifact,
+    BacktestArtifactRepository,
+    SignalBacktester,
+)
 from quantitative.features.materialization import materialize_symbol
 
 
@@ -46,16 +51,73 @@ def _features(args) -> int:
     return 0 if count else 1
 
 
+def _resolve_backtest_symbols(stocks: str | None) -> list[str]:
+    """Resolve an explicit comma-separated list or the registered stock pool."""
+    candidates = (
+        [item.strip() for item in stocks.split(",")]
+        if stocks
+        else all_keys()
+    )
+    # Preserve stock-pool order while removing blanks and duplicates.
+    return list(dict.fromkeys(item for item in candidates if item))
+
+
+def _render_backtest_results(
+    artifact: BacktestArtifact,
+    signal_names: dict[str, str],
+) -> str:
+    """Render one compact row per signal for terminal output."""
+    horizons = tuple(sorted(artifact.horizons))
+    lines = [
+        "",
+        "形态回测结果（成功率表示按该形态方向判断正确）",
+        f"模型: {artifact.model_version} | 截止日: {artifact.data_cutoff or '-'} "
+        f"| 标的数: {len(artifact.universe)}",
+        "",
+        "| 形态 | "
+        + " | ".join(f"{h}日：成功率 / 样本 / 权重" for h in horizons)
+        + " |",
+        "|---|" + "---|" * len(horizons),
+    ]
+    for signal_id in sorted(artifact.metrics):
+        cells = []
+        for horizon in horizons:
+            metric = artifact.metric(signal_id, horizon)
+            if metric is None or metric.samples == 0:
+                cells.append("无样本")
+            else:
+                cells.append(
+                    f"{metric.success_rate:.1%} / {metric.samples} / "
+                    f"{metric.weight:.3f}"
+                )
+        label = signal_names.get(signal_id, signal_id)
+        lines.append(f"| {label} (`{signal_id}`) | " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 def _backtest(args) -> int:
-    symbols = [item.strip() for item in args.stocks.split(",") if item.strip()]
+    symbols = _resolve_backtest_symbols(args.stocks)
     datasets = {}
     with MarketDataRepository(args.db) as repository:
         for symbol in symbols:
             datasets[symbol] = repository.get_range(symbol)
-    artifact = SignalBacktester(min_history=args.min_history).run(datasets)
+    backtester = SignalBacktester(min_history=args.min_history)
+    artifact = backtester.run(datasets)
+    if not artifact.universe:
+        print("回测失败：股票池中没有具备足够本地 K 线的标的")
+        return 1
     repository = BacktestArtifactRepository(args.output)
     repository.save(artifact)
-    print(f"回测完成: {len(symbols)} 个标的，结果写入 {repository.path}")
+    signal_names = {rule.signal_id: rule.name for rule in backtester.engine.rules}
+    print(_render_backtest_results(artifact, signal_names))
+    print()
+    skipped = [symbol for symbol in symbols if symbol not in artifact.universe]
+    print(
+        f"回测完成: {len(artifact.universe)}/{len(symbols)} 个标的，"
+        f"结果写入 {repository.path}"
+    )
+    if skipped:
+        print(f"跳过（本地数据不足）: {','.join(skipped)}")
     return 0
 
 
@@ -81,7 +143,10 @@ def build_parser() -> argparse.ArgumentParser:
     features.set_defaults(handler=_features)
 
     backtest = subparsers.add_parser("backtest", help="回测形态信号")
-    backtest.add_argument("--stocks", required=True, help="逗号分隔的标的名")
+    backtest.add_argument(
+        "--stocks",
+        help="逗号分隔的标的名；不传时回测 STOCK_META 中的全部股票",
+    )
     backtest.add_argument("--db")
     backtest.add_argument("--min-history", type=int, default=120)
     backtest.add_argument("--output")
