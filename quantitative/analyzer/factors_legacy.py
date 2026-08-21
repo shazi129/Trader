@@ -8,6 +8,15 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
+# 将项目根目录（Trader/）加入模块搜索路径，确保无论从哪个目录运行
+# 都能找到 quote_api 与 quantitative 包。
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 from typing import Optional
 
 from quote_api.quote_base import DailyQuote, StockFundamental
@@ -37,7 +46,7 @@ from quantitative.indicators.liquidity import (
 from quantitative.indicators import risk as R
 from utils.logger import get_logger
 
-from .scoring import FactorResult
+from quantitative.analyzer.scoring import FactorResult
 
 _log = get_logger(__name__)
 

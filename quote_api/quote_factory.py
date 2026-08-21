@@ -21,6 +21,7 @@ from quote_api.quote_base import KlineAdjustment, QuoteAPI
 from quote_api.futu import FutuQuoteAPI
 from quote_api.tencent import TencentQuoteAPI
 from quote_api.sina import SinaQuoteAPI
+from quote_api.db_api import DbQuoteAPI
 from quote_api.cached_api import CachedQuoteAPI
 
 
@@ -29,6 +30,7 @@ class QuoteSource(str, Enum):
     FUTU = "futu"
     TENCENT = "tencent"
     SINA = "sina"
+    DB = "db"
 
 
 class QuoteAPIFactory:
@@ -46,6 +48,7 @@ class QuoteAPIFactory:
         QuoteSource.FUTU.value: FutuQuoteAPI,
         QuoteSource.TENCENT.value: TencentQuoteAPI,
         QuoteSource.SINA.value: SinaQuoteAPI,
+        QuoteSource.DB.value: DbQuoteAPI,
     }
 
     # 进程级实例缓存（懒加载、按 source + adjustment 单例）

@@ -5,7 +5,7 @@
 `indicators.volume` 同风格；前置不足窗口的位置写 0.0，保持与
 现有因子对 NaN/0 的处理一致。
 
-字段含义与 `quantitative.factors.liquidity.LiquidityFields` 一一对应。
+字段含义与 `quantitative.fields.liquidity.LiquidityFields` 一一对应。
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ import config
 from quote_api import QuoteAPIFactory
 from utils.logger import get_logger
 
-from .factors import QuantFactorEngine
+from .factors import FactorManager
 from .scoring import AnalysisReport, compute_probability
 from .report import generate_summary
 
@@ -35,47 +35,65 @@ class QuantAnalyzer:
             self.impl = QuoteAPIFactory.create(self.api)
             _log.info("使用原始API: %s", self.impl.SOURCE)
 
-    def analyze(self, name_key: str, days: int = 500) -> Optional[AnalysisReport]:
-        """对指定股票进行多因子分析。"""
-        if not self.impl.is_supported(name_key):
-            _log.warning("api '%s' does not support '%s'", self.api, name_key)
+    def analyze(self, name_key: str, days: int = 500,
+                 anchor_date: Optional[str] = None) -> Optional[AnalysisReport]:
+        """对指定股票进行多因子分析（基于新因子体系）。
+
+        :param days: 历史回看天数（用于 FactorManager 预读窗口）
+        :param anchor_date: 截止日（含）；不传时取数据最新日
+        """
+        from quote_api import QuoteAPIFactory as _QAF
+        # 取最新日期作为默认 anchor
+        if anchor_date is None:
+            if not self.impl.is_supported(name_key):
+                _log.warning("api '%s' does not support '%s'", self.api, name_key)
+                return None
+            q = self.impl.get_klines(name_key, limit=1)
+            if not q:
+                _log.warning("无法获取K线数据: %s", name_key)
+                return None
+            anchor_date = q[-1].date
+
+        _log.info("分析 %s @ %s (回看%d日, api=%s)",
+                  name_key, anchor_date, days, self.api)
+        mgr = FactorManager(api=self.api, use_cache=self.use_cache)
+        fres = mgr.analyze(name_key, anchor_date=anchor_date, lookback=days)
+        if fres is None:
+            _log.warning("因子分析失败: %s", name_key)
             return None
 
-        _log.info("正在获取 %s 最近 %d 天K线数据 (api=%s)...",
-                  name_key, days, self.api)
-        quotes = self.impl.get_klines(name_key, limit=days)
-        if not quotes:
-            _log.warning("无法获取K线数据")
-            return None
+        # 综合上涨概率 → 映射为旧式 prob_up/down/trend
+        cp = fres.composite_prob_up
+        prob_up = round((cp.get(30, 0.5) + cp.get(60, 0.5)) / 2.0, 3)
+        prob_up = max(0.15, min(0.85, prob_up))
+        prob_down = round(1.0 - prob_up, 3)
+        if prob_up > 0.65:
+            trend = "上涨趋势"
+        elif prob_up < 0.35:
+            trend = "下跌趋势"
+        else:
+            trend = "震荡整理"
 
-        _log.info("获取到 %d 条数据，区间: %s ~ %s",
-                  len(quotes), quotes[0].date, quotes[-1].date)
-
-        # 基本面（可选）
-        fundamentals = None
-        try:
-            _log.info("正在获取 %s 基本面数据...", name_key)
-            fundamentals = self.impl.get_fundamentals(name_key)
-            if fundamentals:
-                _log.info("获取到基本面数据: PE=%.2f, PB=%.2f",
-                          fundamentals.pe_ttm, fundamentals.pb)
-            else:
-                _log.info("无基本面数据，将跳过基本面因子")
-        except Exception as e:
-            _log.warning("获取基本面数据失败: %s", e)
-
-        engine = QuantFactorEngine(quotes, fundamentals)
-        factors = engine.compute_all()
-
-        prob_up, prob_down, trend = compute_probability(factors)
+        # 用旧 FactorResult 形态包装（signal 由 forecast 方向推导），保持 report 兼容
+        from .scoring import FactorResult
+        factors = [
+            FactorResult(
+                name=o.name,
+                category=o.category,
+                value=o.value,
+                signal=o.direction,
+                description=o.description,
+            )
+            for o in fres.outputs
+        ]
 
         stock_info = config.global_stock_list.get(name_key)
         report = AnalysisReport(
             stock_name=stock_info.name if stock_info else name_key,
             name_key=name_key,
             data_source=self.api,
-            data_days=len(quotes),
-            latest_price=quotes[-1].close,
+            data_days=fres.lookback,
+            latest_price=fres.anchor_price,
             factors=factors,
             bullish_score=round(prob_up * 100, 1),
             bearish_score=round(prob_down * 100, 1),
@@ -83,5 +101,5 @@ class QuantAnalyzer:
             probability_up=prob_up,
             probability_down=prob_down,
         )
-        report.summary = generate_summary(report)
+        report.summary = generate_summary(report) + "\n\n" + fres.summary
         return report
