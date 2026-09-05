@@ -1,4 +1,4 @@
-文件结构
+# 文件结构
 ├─ database 数据库文件目录
 ├─ docs 文档
 ├─ financial_reports 财报相关处理
@@ -15,11 +15,31 @@
 │   ├─ml 机器学习模块
 │   └─analysis  分析报告模块
 │
-├─ quote_api 数据拉取api
-├─ data_retrieval
+├─ quote_api 数据获取api
+│   ├─ futu
+│   └─...
+│
+├─ data_retrieval 拉取数据填充数据库的模块
 │
 │
 │
 ├─ tests 测试模块
 ├─ tools 一些小工具
 └─ logs 运行日志，
+
+# 模块功能
+
+## quote_api
+这是拉取数据数据的接口，可以通过不同的途径拉取股票数据，例如腾讯采集，futu OpenID等，基类为：
+```mermaid
+classDiagram
+class QuoteAPI {
+    %% 获取一日或多日行情
+    + get_klines(stock_name, start_date, end_date) list[DailyQuote]
+    %% api是否支持这只股票
+    + is_supported(stock_name) boolean
+    %% 获取股票代码，不同的api可能加不同的前缀
+    - get_stock_code(stock_name) string
+}
+```
+
